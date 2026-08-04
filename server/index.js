@@ -126,8 +126,8 @@ app.get('*', (req, res, next) => {
 // DB 초기화 및 서버 기동
 getDb()
   .then(() => {
-    app.listen(PORT, () => {
-      console.log(`🚀 Node.js Express + SQLite API Server is running on http://localhost:${PORT}`);
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Node.js Express + SQLite API Server is running on port ${PORT} (0.0.0.0)`);
     });
   })
   .catch(err => {
