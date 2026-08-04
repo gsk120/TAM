@@ -26,7 +26,6 @@ RUN npm ci --only=production
 # 빌드 결과물 및 서버 소스 복사
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server ./server
-COPY --from=builder /app/data ./data 2>/dev/null || true
 
 # 데이터 보관용 디렉토리 생성
 RUN mkdir -p /app/data
