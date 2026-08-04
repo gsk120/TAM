@@ -10,19 +10,23 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATABASE_URL = process.env.DATABASE_URL;
-
 let pgPoolInstance = null;
 let sqliteDbInstance = null;
 
-export const isPostgres = Boolean(DATABASE_URL);
+// 동적 Postgres 유무 판별
+export function getIsPostgres() {
+  return Boolean(process.env.DATABASE_URL);
+}
 
 // 데이터베이스 초기화 및 인스턴스 획득
 export async function getDb() {
+  const dbUrl = process.env.DATABASE_URL;
+  const isPostgres = Boolean(dbUrl);
+
   if (isPostgres) {
     if (!pgPoolInstance) {
       pgPoolInstance = new Pool({
-        connectionString: DATABASE_URL,
+        connectionString: dbUrl,
         ssl: {
           rejectUnauthorized: false,
         },
@@ -136,6 +140,7 @@ export async function getDb() {
 
 // 전체 DB 조회 (프론트엔드 loadDatabase 호환)
 export async function getFullDatabase() {
+  const isPostgres = getIsPostgres();
   const db = await getDb();
 
   let transactionsRows = [];
@@ -238,6 +243,7 @@ export function syncFullDatabase(fullDb) {
 }
 
 async function performSync(fullDb) {
+  const isPostgres = getIsPostgres();
   const db = await getDb();
 
   if (isPostgres) {
