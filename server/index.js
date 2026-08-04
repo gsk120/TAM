@@ -114,7 +114,8 @@ app.delete('/api/transactions/:id', async (req, res) => {
 const distPath = path.join(__dirname, '../dist');
 app.use(express.static(distPath));
 
-app.get('*', (req, res, next) => {
+// Express 5 호환 fallback 미들웨어 (API 외 모든 경로 요청 시 index.html 서빙)
+app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(distPath, 'index.html'), (err) => {
     if (err) {
