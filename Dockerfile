@@ -29,12 +29,10 @@ RUN apt-get update && apt-get install -y python3 make g++ libsqlite3-dev && rm -
 COPY package*.json ./
 RUN npm ci --only=production --build-from-source=sqlite3
 
-# 빌드 결과물 및 서버 소스 복사
+# 빌드 결과물, 서버 소스 및 초기 DB 데이터(data/finance.db) 복사
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server ./server
-
-# 데이터 보관용 디렉토리 생성
-RUN mkdir -p /app/data
+COPY --from=builder /app/data ./data
 
 # Google Cloud Run 포트 노출
 EXPOSE 8080
