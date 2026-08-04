@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { getDb, getFullDatabase, syncFullDatabase } from './db.js';
+import { getDb, getFullDatabase, syncFullDatabase, getIsPostgres, getDbEngineName } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +16,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
+  res.json({ status: 'ok', time: new Date().toISOString(), dbEngine: getDbEngineName() });
 });
 
 // 1. 전체 데이터베이스 조회 (loadDatabase 연동)
@@ -53,7 +53,7 @@ app.post('/api/migrate', async (req, res) => {
       return res.status(400).json({ error: 'Invalid migration data' });
     }
     await syncFullDatabase(localDb);
-    res.json({ success: true, message: 'LocalStorage migrated to SQLite successfully' });
+    res.json({ success: true, message: 'LocalStorage migrated successfully' });
   } catch (err) {
     console.error('Migration failed:', err);
     res.status(500).json({ error: 'Migration failed', details: err.message });
@@ -64,8 +64,13 @@ app.post('/api/migrate', async (req, res) => {
 app.get('/api/transactions', async (req, res) => {
   try {
     const db = await getDb();
-    const rows = await db.all('SELECT * FROM transactions ORDER BY date DESC, id DESC');
-    res.json(rows);
+    if (getIsPostgres()) {
+      const resData = await db.query('SELECT * FROM transactions ORDER BY date DESC, id DESC');
+      res.json(resData.rows);
+    } else {
+      const rows = await db.all('SELECT * FROM transactions ORDER BY date DESC, id DESC');
+      res.json(rows);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -76,25 +81,35 @@ app.post('/api/transactions', async (req, res) => {
     const db = await getDb();
     const t = req.body;
     const id = t.id || String(Date.now());
-    await db.run(
-      `INSERT INTO transactions (id, date, amount, category, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        t.date || '',
-        Number(t.amount) || 0,
-        t.category || '',
-        t.subcategory || '',
-        t.type || '소비',
-        t.description || '',
-        t.memo || '',
-        t.account || '',
-        t.payment_method || '',
-        t.asset_type || '',
-        t.owner || '',
-        t.created_at || new Date().toISOString(),
-      ]
-    );
+    const params = [
+      id,
+      t.date || '',
+      Number(t.amount) || 0,
+      t.category || '',
+      t.subcategory || '',
+      t.type || '소비',
+      t.description || '',
+      t.memo || '',
+      t.account || '',
+      t.payment_method || '',
+      t.asset_type || '',
+      t.owner || '',
+      t.created_at || new Date().toISOString(),
+    ];
+
+    if (getIsPostgres()) {
+      await db.query(
+        `INSERT INTO transactions (id, date, amount, category, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        params
+      );
+    } else {
+      await db.run(
+        `INSERT INTO transactions (id, date, amount, category, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params
+      );
+    }
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -104,7 +119,11 @@ app.post('/api/transactions', async (req, res) => {
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const db = await getDb();
-    await db.run('DELETE FROM transactions WHERE id = ?', [req.params.id]);
+    if (getIsPostgres()) {
+      await db.query('DELETE FROM transactions WHERE id = $1', [req.params.id]);
+    } else {
+      await db.run('DELETE FROM transactions WHERE id = ?', [req.params.id]);
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -128,10 +147,11 @@ app.use((req, res, next) => {
 // DB 초기화 및 서버 기동
 getDb()
   .then(() => {
+    const engineName = getDbEngineName();
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Node.js Express + SQLite API Server is running on port ${PORT} (0.0.0.0)`);
+      console.log(`🚀 Node.js Express API Server (${engineName}) is running on port ${PORT} (0.0.0.0)`);
     });
   })
   .catch(err => {
-    console.error('Failed to initialize SQLite DB:', err);
+    console.error('Failed to initialize Database:', err);
   });

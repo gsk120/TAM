@@ -18,6 +18,11 @@ export function getIsPostgres() {
   return Boolean(process.env.DATABASE_URL);
 }
 
+// 활성화된 DB 엔진 이름 반환
+export function getDbEngineName() {
+  return getIsPostgres() ? 'PostgreSQL (Supabase)' : 'SQLite';
+}
+
 // 데이터베이스 초기화 및 인스턴스 획득
 export async function getDb() {
   const dbUrl = process.env.DATABASE_URL;
