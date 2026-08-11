@@ -27,21 +27,23 @@ export const INCOME_CATEGORIES = [
   { id: 'inc_etc', name: '기타수입', owner: '가족공동' },
 ];
 
+export const DEFAULT_INCOME_CATEGORIES = INCOME_CATEGORIES;
+
 export const CASH_ASSET_ITEMS = [
   { id: 'acc_ibk_gk', name: '기업은행(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_hana_gk', name: '하나은행(기석)', owner: '기석', defaultBalance: 83127 },
-  { id: 'acc_kbank_gk', name: '케이뱅크(기석)', owner: '기석', defaultBalance: 66454 },
-  { id: 'acc_ibk_sj', name: '기업은행(승주)', owner: '승주', defaultBalance: 90176 },
-  { id: 'acc_woori_sj', name: '우리은행(승주)', owner: '승주', defaultBalance: 244382 },
-  { id: 'acc_busan_sj', name: '부산은행(승주)', owner: '승주', defaultBalance: 100000 },
-  { id: 'acc_kbank_sj', name: '케이뱅크(승주)', owner: '승주', defaultBalance: 23766 },
-  { id: 'acc_cma', name: '미래에셋CMA', owner: '가족공동', defaultBalance: 36493386 },
-  { id: 'acc_bonds', name: '기업은행중금채', owner: '가족공동', defaultBalance: 1843037 },
+  { id: 'acc_hana_gk', name: '하나은행(기석)', owner: '기석', defaultBalance: 0 },
+  { id: 'acc_kbank_gk', name: '케이뱅크(기석)', owner: '기석', defaultBalance: 0 },
+  { id: 'acc_ibk_sj', name: '기업은행(승주)', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_woori_sj', name: '우리은행(승주)', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_busan_sj', name: '부산은행(승주)', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_kbank_sj', name: '케이뱅크(승주)', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_cma', name: '미래에셋CMA', owner: '가족공동', defaultBalance: 0 },
+  { id: 'acc_bonds', name: '기업은행중금채', owner: '가족공동', defaultBalance: 0 },
   { id: 'acc_hana_sav', name: '하나은행적금', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_woori_sav', name: '우리은행적금', owner: '승주', defaultBalance: 1200000 },
-  { id: 'acc_house_gk', name: '주택청약(기석)', owner: '기석', defaultBalance: 16520000 },
-  { id: 'acc_house_sj', name: '주택청약(승주)', owner: '승주', defaultBalance: 9620000 },
-  { id: 'acc_busan_dep', name: '부산은행예금', owner: '승주', defaultBalance: 1500000 },
+  { id: 'acc_woori_sav', name: '우리은행적금', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_house_gk', name: '주택청약(기석)', owner: '기석', defaultBalance: 0 },
+  { id: 'acc_house_sj', name: '주택청약(승주)', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_busan_dep', name: '부산은행예금', owner: '승주', defaultBalance: 0 },
 ];
 
 export const INVEST_ASSET_ITEMS = [
@@ -52,12 +54,13 @@ export const INVEST_ASSET_ITEMS = [
   { id: 'inv_toss_sj', name: '토스증권(승주)', owner: '승주', defaultBalance: 0 },
   { id: 'inv_pension_gk', name: '퇴직연금(기석)', owner: '기석', defaultBalance: 0 },
   { id: 'inv_pension_sj', name: '퇴직연금(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'inv_realestate', name: '부동산', owner: '가족공동', defaultBalance: 0, isRealEstate: true },
+  { id: 'inv_realestate', name: '길음뉴타운 6단지', owner: '가족공동', defaultBalance: 0, isRealEstate: true },
+  { id: 'inv_user_1785734857131', name: '종암 SK', owner: '가족공동', defaultBalance: 0, isRealEstate: true },
 ];
 
 export const DEBT_ITEMS = [
-  { id: 'debt_mortgage', name: '주담대', owner: '가족공동', defaultBalance: 510000000 },
-  { id: 'debt_minus', name: '마통', owner: '가족공동', defaultBalance: 90000000 },
+  { id: 'debt_mortgage', name: '주담대', owner: '가족공동', defaultBalance: 0 },
+  { id: 'debt_minus', name: '마통', owner: '가족공동', defaultBalance: 0 },
 ];
 
 export const DEFAULT_ASSET_STRUCTURE = {
@@ -132,8 +135,9 @@ export function getCategoryBudgetStatus(categoryName, spentAmount, budgetAmount)
 }
 
 // 월간 재무 종합 집계 함수 (3가지 관점 회계 처리)
-export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets = {}, categoriesList = DEFAULT_CATEGORIES) {
+export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets = {}, categoriesList = DEFAULT_CATEGORIES, incomeCategoriesList = INCOME_CATEGORIES) {
   const activeCategories = Array.isArray(categoriesList) && categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES;
+  const activeIncomeCategories = Array.isArray(incomeCategoriesList) && incomeCategoriesList.length > 0 ? incomeCategoriesList : INCOME_CATEGORIES;
 
   // 해당 월 거래 필터링 (YYYY-MM)
   const monthTxs = transactions.filter(t => t.date.startsWith(yearMonth));
@@ -149,32 +153,37 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
   const categorySpentMap = {};
   activeCategories.forEach(cat => {
     categorySpentMap[cat.name] = 0;
+    if (cat.id) categorySpentMap[cat.id] = 0;
   });
 
-  const incomeMap = {
-    '기석월급': 0,
-    '기석상여': 0,
-    '승주월급': 0,
-    '승주상여': 0,
-    '실비': 0,
-    '기타수입': 0,
-  };
+  const incomeMap = {};
+  activeIncomeCategories.forEach(inc => {
+    incomeMap[inc.name] = 0;
+    if (inc.id) incomeMap[inc.id] = 0;
+  });
 
   monthTxs.forEach(tx => {
     const rawAmt = Number(tx.amount) || 0;
     const absAmt = Math.abs(rawAmt);
     const type = tx.type; // '수입', '지출', '계좌이체', '자산증가', '부채상환'
     const category = tx.category;
+    const categoryId = tx.category_id;
 
     if (type === '수입') {
       totalIncome += absAmt;
-      if (incomeMap[category] !== undefined) {
-        incomeMap[category] += absAmt;
+
+      // 수입 항목 매핑 (ID 기반 우선, 폴백 이름)
+      const matchedInc = activeIncomeCategories.find(i => (categoryId && i.id === categoryId) || i.name === category);
+      if (matchedInc) {
+        incomeMap[matchedInc.name] = (incomeMap[matchedInc.name] || 0) + absAmt;
+        if (matchedInc.id) incomeMap[matchedInc.id] = (incomeMap[matchedInc.id] || 0) + absAmt;
       } else {
-        incomeMap['기타수입'] += absAmt;
+        incomeMap['기타수입'] = (incomeMap['기타수입'] || 0) + absAmt;
+        incomeMap[category] = (incomeMap[category] || 0) + absAmt;
       }
 
-      if (category === '실비') {
+      // 실비 환급 매핑 (ID: inc_med_ref 또는 카테고리명: '실비')
+      if (categoryId === 'inc_med_ref' || category === '실비' || (matchedInc && matchedInc.id === 'inc_med_ref')) {
         medicalRefund += absAmt;
       }
     } else if (type === '지출') {
@@ -182,26 +191,38 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
       realConsumption += rawAmt;
       totalCashOutflow += rawAmt;
 
-      if (categorySpentMap[category] !== undefined) {
-        categorySpentMap[category] += rawAmt;
+      const matchedCat = activeCategories.find(c => (categoryId && c.id === categoryId) || c.name === category);
+      const targetKey = matchedCat ? matchedCat.name : category;
+
+      if (categorySpentMap[targetKey] !== undefined) {
+        categorySpentMap[targetKey] += rawAmt;
       } else {
-        categorySpentMap[category] = rawAmt;
+        categorySpentMap[targetKey] = rawAmt;
       }
 
-      if (category === '의료비') {
+      if (matchedCat && matchedCat.id) {
+        categorySpentMap[matchedCat.id] = (categorySpentMap[matchedCat.id] || 0) + rawAmt;
+      }
+
+      // 의료비 지출 매핑 (ID: cat_med 또는 카테고리명: '의료비')
+      if (categoryId === 'cat_med' || category === '의료비' || (matchedCat && matchedCat.id === 'cat_med')) {
         totalMedicalExpense += rawAmt;
       }
     } else if (type === '자산증가') {
       totalCashOutflow += rawAmt;
       assetIncrease += rawAmt;
-      if (categorySpentMap[category] !== undefined) {
-        categorySpentMap[category] += rawAmt;
+      const matchedCat = activeCategories.find(c => (categoryId && c.id === categoryId) || c.name === category);
+      const targetKey = matchedCat ? matchedCat.name : category;
+      if (categorySpentMap[targetKey] !== undefined) {
+        categorySpentMap[targetKey] += rawAmt;
       }
     } else if (type === '부채상환') {
       totalCashOutflow += rawAmt;
       debtReduction += rawAmt;
-      if (categorySpentMap[category] !== undefined) {
-        categorySpentMap[category] += rawAmt;
+      const matchedCat = activeCategories.find(c => (categoryId && c.id === categoryId) || c.name === category);
+      const targetKey = matchedCat ? matchedCat.name : category;
+      if (categorySpentMap[targetKey] !== undefined) {
+        categorySpentMap[targetKey] += rawAmt;
       }
     } else if (type === '계좌이체') {
       // 내계좌이체 / 카드대금결제는 총수입, 실제소비에서 모두 제외
@@ -214,7 +235,7 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
   // 카테고리별 예산 및 위험 TOP3 집계
   const categoryDetails = activeCategories.map(cat => {
     const budget = categoryBudgets[cat.name] ?? (Number(cat.defaultBudget) || 0);
-    let spent = categorySpentMap[cat.name] || 0;
+    let spent = categorySpentMap[cat.name] ?? (cat.id ? categorySpentMap[cat.id] : 0);
 
     // PRD 9.10: 의료비 예산 사용액은 순의료비 = MAX(0, 의료비 총지출 - 실비 수입) 기준 적용
     if (cat.name === '의료비' || cat.id === 'cat_med') {

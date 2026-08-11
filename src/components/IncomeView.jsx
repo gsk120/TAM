@@ -1,23 +1,115 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW } from '../utils/finance';
+import { formatKRW, DEFAULT_INCOME_CATEGORIES } from '../utils/finance';
+import { Plus, Edit2, Trash2, X, ChevronDown, Info } from 'lucide-react';
 
 export default function IncomeView() {
-  const { currentMetrics, yearlyMetrics, selectedMonth } = useApp();
+  const { db, currentMetrics, yearlyMetrics, selectedMonth, addIncomeCategory, updateIncomeCategory, deleteIncomeCategory } = useApp();
 
-  const BENCHMARK_INCOME = 10000000; // 1,000만원 보수적 기준 (기석 700만 + 승주 육아휴직 300만)
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [nameInput, setNameInput] = useState('');
+  const [ownerInput, setOwnerInput] = useState('가족공동');
+  const [modalMsg, setModalMsg] = useState('');
+
+  // 뷰 스위처: 'compact' (5컬럼 요약), 'giseok' (기석 상세), 'seungju' (승주 상세), 'all' (전체 펼침)
+  const [viewTab, setViewTab] = useState('compact');
+  // 드릴다운 팝오버 상태: { month, owner, data }
+  const [popover, setPopover] = useState(null);
+
+  const activeIncomeCategories = db.incomeCategories && db.incomeCategories.length > 0
+    ? db.incomeCategories
+    : DEFAULT_INCOME_CATEGORIES;
+
+  const BENCHMARK_INCOME = 10000000;
   const diffFromBenchmark = currentMetrics.totalIncome - BENCHMARK_INCOME;
+
+  // 소유자별 수입 합계 구하기
+  const getOwnerIncomeTotal = (iMap, owner) => {
+    let total = 0;
+    activeIncomeCategories
+      .filter(cat => (cat.owner || '가족공동') === owner)
+      .forEach(cat => {
+        total += (iMap[cat.name] || iMap[cat.id] || 0);
+      });
+    return total;
+  };
+
+  // 소유자별 세부 항목 리스트
+  const getOwnerCategoryBreakdown = (iMap, owner) => {
+    return activeIncomeCategories
+      .filter(cat => (cat.owner || '가족공동') === owner)
+      .map(cat => ({
+        name: cat.name,
+        amount: iMap[cat.name] || iMap[cat.id] || 0,
+      }));
+  };
+
+  const handleOpenAddModal = () => {
+    setEditingCategory(null);
+    setNameInput('');
+    setOwnerInput('가족공동');
+    setModalMsg('');
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (cat) => {
+    setEditingCategory(cat);
+    setNameInput(cat.name);
+    setOwnerInput(cat.owner || '가족공동');
+    setModalMsg('');
+    setIsModalOpen(true);
+  };
+
+  const handleSaveModal = (e) => {
+    e.preventDefault();
+    setModalMsg('');
+
+    if (editingCategory) {
+      const res = updateIncomeCategory(editingCategory.id, { name: nameInput, owner: ownerInput });
+      if (!res.success) {
+        setModalMsg(res.message);
+        return;
+      }
+    } else {
+      const res = addIncomeCategory({ name: nameInput, owner: ownerInput });
+      if (!res.success) {
+        setModalMsg(res.message);
+        return;
+      }
+    }
+    setIsModalOpen(false);
+  };
+
+  const handleDeleteModal = (id) => {
+    if (!window.confirm('정말 이 수입 항목을 삭제하시겠습니까?')) return;
+    const res = deleteIncomeCategory(id);
+    if (!res.success) {
+      setModalMsg(res.message);
+      return;
+    }
+    setIsModalOpen(false);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* 타이틀 */}
-      <div>
-        <h2 style={{ fontSize: '1.4rem', fontWeight: '700', color: '#fff' }}>
-          💰 수입 관리 & 보수적 수입 기준 비교
-        </h2>
-        <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-          기석/승주 월급·상여, 실비환급 및 기타수입 5개 항목의 거래내역 기반 정확한 집계
-        </p>
+      {/* 헤더 & 우측 관리 버튼 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: '700', color: '#fff' }}>
+            💰 수입 관리 & 소유자별 수입 집계
+          </h2>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            기석/승주/공동 소유자별 수입 항목을 동적으로 관리하고 가로 팽창 없는 컴팩트 표로 집계합니다.
+          </p>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={handleOpenAddModal}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+        >
+          <Plus size={16} /> 수입 항목 추가/관리
+        </button>
       </div>
 
       {/* 당월 수입 카드 */}
@@ -28,87 +120,200 @@ export default function IncomeView() {
             {formatKRW(currentMetrics.totalIncome)}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            보수적 가구 수입 기준(1,000만원) 대비 {diffFromBenchmark >= 0 ? `+${formatKRW(diffFromBenchmark)} 달성` : `${formatKRW(diffFromBenchmark)}`}
+            보수적 수입 기준(1,000만원) 대비 {diffFromBenchmark >= 0 ? `+${formatKRW(diffFromBenchmark)} 달성` : `${formatKRW(diffFromBenchmark)}`}
           </div>
         </div>
 
         <div className="glass-card" style={{ padding: '20px' }}>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>기석 수입 합계</div>
           <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-            {formatKRW((currentMetrics.incomeMap['기석월급'] || 0) + (currentMetrics.incomeMap['기석상여'] || 0))}
+            {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, '기석'))}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            월급: {formatKRW(currentMetrics.incomeMap['기석월급'] || 0)} | 상여: {formatKRW(currentMetrics.incomeMap['기석상여'] || 0)}
+            {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, '기석')
+              .map(b => `${b.name}: ${formatKRW(b.amount)}`)
+              .join(' | ')}
           </div>
         </div>
 
         <div className="glass-card" style={{ padding: '20px' }}>
           <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>승주 수입 합계</div>
           <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-            {formatKRW((currentMetrics.incomeMap['승주월급'] || 0) + (currentMetrics.incomeMap['승주상여'] || 0))}
+            {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, '승주'))}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            월급/육아휴직: {formatKRW(currentMetrics.incomeMap['승주월급'] || 0)} | 상여: {formatKRW(currentMetrics.incomeMap['승주상여'] || 0)}
+            {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, '승주')
+              .map(b => `${b.name}: ${formatKRW(b.amount)}`)
+              .join(' | ')}
           </div>
         </div>
 
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>실비 / 기타 수입</div>
+          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>기타 / 공동 수입</div>
           <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--accent-cyan)', marginTop: '4px' }}>
-            {formatKRW((currentMetrics.incomeMap['실비'] || 0) + (currentMetrics.incomeMap['기타수입'] || 0))}
+            {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, '가족공동'))}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            실비환급: {formatKRW(currentMetrics.incomeMap['실비'] || 0)} | 기타: {formatKRW(currentMetrics.incomeMap['기타수입'] || 0)}
+            {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, '가족공동')
+              .map(b => `${b.name}: ${formatKRW(b.amount)}`)
+              .join(' | ')}
           </div>
         </div>
       </div>
 
-      {/* 엑셀 수입관리 시트 호환 테이블 (실제 수입 데이터 100% 매핑) */}
-      <div className="glass-card" style={{ padding: '24px' }}>
-        <h3 style={{ fontSize: '1.15rem', fontWeight: '700', marginBottom: '16px', color: '#fff' }}>
-          🗓️ 연간 월별 수입 항목별 상세 집계 표 (거래내역 원본 100% 자동 연동)
-        </h3>
+      {/* 연간 수입 표 & 뷰 스위처 */}
+      <div className="glass-card" style={{ padding: '24px', position: 'relative' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <h3 style={{ fontSize: '1.15rem', fontWeight: '700', color: '#fff' }}>
+            🗓️ 연간 월별 수입 집계 표
+          </h3>
+
+          {/* 뷰 스위처 탭 */}
+          <div style={{ display: 'flex', gap: '4px', background: 'rgba(15, 23, 42, 0.6)', padding: '4px', borderRadius: 'var(--radius-sm)' }}>
+            <button
+              className={`btn btn-sm ${viewTab === 'compact' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setViewTab('compact')}
+            >
+              📊 전체 요약 (5컬럼)
+            </button>
+
+            <button
+              className={`btn btn-sm ${viewTab === 'giseok' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setViewTab('giseok')}
+            >
+              🙋‍♂️ 기석 상세
+            </button>
+
+            <button
+              className={`btn btn-sm ${viewTab === 'seungju' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setViewTab('seungju')}
+            >
+              🙋‍♀️ 승주 상세
+            </button>
+
+            <button
+              className={`btn btn-sm ${viewTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setViewTab('all')}
+            >
+              🔍 카테고리 전체
+            </button>
+          </div>
+        </div>
+
+        {/* 안내 얼럿 */}
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Info size={14} /> 기본 5컬럼 뷰에서는 각 월의 수입 셀을 클릭하시면 세부 카테고리 내역이 팝오버로 표출됩니다.
+        </div>
+
+        {/* 표 영역 */}
         <div className="data-table-container">
           <table className="data-table">
             <thead>
-              <tr>
-                <th>월</th>
-                <th>기석 월급</th>
-                <th>기석 상여</th>
-                <th>기석 수입합계</th>
-                <th>승주 월급/육아휴직</th>
-                <th>승주 상여</th>
-                <th>승주 수입합계</th>
-                <th>기타/실비 수입</th>
-                <th>총 수입</th>
-              </tr>
+              {viewTab === 'compact' && (
+                <tr>
+                  <th>월</th>
+                  <th>기석 수입 합계 💡</th>
+                  <th>승주 수입 합계 💡</th>
+                  <th>기타 / 공동 수입 💡</th>
+                  <th>총 수입</th>
+                </tr>
+              )}
+
+              {viewTab === 'giseok' && (
+                <tr>
+                  <th>월</th>
+                  {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '기석').map(c => <th key={c.id}>{c.name}</th>)}
+                  <th>기석 수입 합계</th>
+                  <th>총 수입</th>
+                </tr>
+              )}
+
+              {viewTab === 'seungju' && (
+                <tr>
+                  <th>월</th>
+                  {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '승주').map(c => <th key={c.id}>{c.name}</th>)}
+                  <th>승주 수입 합계</th>
+                  <th>총 수입</th>
+                </tr>
+              )}
+
+              {viewTab === 'all' && (
+                <tr>
+                  <th>월</th>
+                  {activeIncomeCategories.map(c => <th key={c.id}>{c.name} ({c.owner || '공동'})</th>)}
+                  <th>총 수입</th>
+                </tr>
+              )}
             </thead>
             <tbody>
               {yearlyMetrics.map(m => {
                 const isSelected = m.yearMonth === selectedMonth;
                 const iMap = m.incomeMap || {};
-                const gkSal = iMap['기석월급'] || 0;
-                const gkBon = iMap['기석상여'] || 0;
-                const gkTotal = gkSal + gkBon;
 
-                const sjSal = iMap['승주월급'] || 0;
-                const sjBon = iMap['승주상여'] || 0;
-                const sjTotal = sjSal + sjBon;
-
-                const etcTotal = (iMap['기타수입'] || 0) + (iMap['실비'] || 0);
-                const calcTotalIncome = m.totalIncome;
+                const gkTotal = getOwnerIncomeTotal(iMap, '기석');
+                const sjTotal = getOwnerIncomeTotal(iMap, '승주');
+                const etcTotal = getOwnerIncomeTotal(iMap, '가족공동');
 
                 return (
                   <tr key={m.yearMonth} style={{ background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'transparent', fontWeight: isSelected ? '600' : 'normal' }}>
                     <td>{m.month} {isSelected && '👈'}</td>
-                    <td>{formatKRW(gkSal)}</td>
-                    <td>{formatKRW(gkBon)}</td>
-                    <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(gkTotal)}</td>
-                    <td>{formatKRW(sjSal)}</td>
-                    <td>{formatKRW(sjBon)}</td>
-                    <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(sjTotal)}</td>
-                    <td>{formatKRW(etcTotal)}</td>
-                    <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(calcTotalIncome)}</td>
+
+                    {/* Compact View */}
+                    {viewTab === 'compact' && (
+                      <>
+                        <td
+                          style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
+                          onClick={() => setPopover({ month: m.month, owner: '기석', items: getOwnerCategoryBreakdown(iMap, '기석') })}
+                        >
+                          {formatKRW(gkTotal)}
+                        </td>
+                        <td
+                          style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
+                          onClick={() => setPopover({ month: m.month, owner: '승주', items: getOwnerCategoryBreakdown(iMap, '승주') })}
+                        >
+                          {formatKRW(sjTotal)}
+                        </td>
+                        <td
+                          style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
+                          onClick={() => setPopover({ month: m.month, owner: '가족공동', items: getOwnerCategoryBreakdown(iMap, '가족공동') })}
+                        >
+                          {formatKRW(etcTotal)}
+                        </td>
+                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
+                      </>
+                    )}
+
+                    {/* Giseok View */}
+                    {viewTab === 'giseok' && (
+                      <>
+                        {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '기석').map(c => (
+                          <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
+                        ))}
+                        <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(gkTotal)}</td>
+                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
+                      </>
+                    )}
+
+                    {/* Seungju View */}
+                    {viewTab === 'seungju' && (
+                      <>
+                        {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '승주').map(c => (
+                          <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
+                        ))}
+                        <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(sjTotal)}</td>
+                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
+                      </>
+                    )}
+
+                    {/* All Categories View */}
+                    {viewTab === 'all' && (
+                      <>
+                        {activeIncomeCategories.map(c => (
+                          <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
+                        ))}
+                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
+                      </>
+                    )}
                   </tr>
                 );
               })}
@@ -116,6 +321,133 @@ export default function IncomeView() {
           </table>
         </div>
       </div>
+
+      {/* 셀 클릭 드릴다운 팝오버 모달 */}
+      {popover && (
+        <div className="modal-overlay" onClick={() => setPopover(null)}>
+          <div className="modal-content" style={{ maxWidth: '400px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: '700', color: '#fff' }}>
+                🔍 {popover.month} {popover.owner} 수입 세부 내역
+              </h3>
+              <button onClick={() => setPopover(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {popover.items.map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', borderRadius: 'var(--radius-sm)' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{item.name}</span>
+                  <span style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(item.amount)}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ textAlign: 'right', marginTop: '16px' }}>
+              <button className="btn btn-secondary" onClick={() => setPopover(null)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 수입 항목 추가 / 수정 모달 */}
+      {isModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
+          <div className="modal-content" style={{ maxWidth: '540px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: '#fff' }}>
+                {editingCategory ? '⚙️ 수입 항목 수정' : '➕ 신규 수입 항목 추가'}
+              </h3>
+              <button onClick={() => setIsModalOpen(false)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
+                <X size={22} />
+              </button>
+            </div>
+
+            {modalMsg && (
+              <div style={{ padding: '10px 14px', background: 'rgba(244, 63, 94, 0.15)', border: '1px solid var(--accent-rose)', borderRadius: 'var(--radius-sm)', color: 'var(--accent-rose)', fontSize: '0.85rem', marginBottom: '16px' }}>
+                {modalMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveModal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label className="form-label">수입 카테고리 명칭</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="예: 기석부업, 배당금, 연말정산환급금"
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="form-label">소유자 귀속 지정</label>
+                <select
+                  className="form-input"
+                  value={ownerInput}
+                  onChange={e => setOwnerInput(e.target.value)}
+                >
+                  <option value="기석">기석 수입</option>
+                  <option value="승주">승주 수입</option>
+                  <option value="가족공동">기타 / 가족공동 수입</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                {editingCategory ? (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => handleDeleteModal(editingCategory.id)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Trash2 size={16} /> 삭제
+                  </button>
+                ) : <div />}
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>취소</button>
+                  <button type="submit" className="btn btn-primary">저장하기</button>
+                </div>
+              </div>
+            </form>
+
+            {/* 기존 등록 항목 리스트 */}
+            <div style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+              <h4 style={{ fontSize: '0.95rem', fontWeight: '600', color: '#fff', marginBottom: '12px' }}>
+                📋 현재 등록된 수입 항목 목록 ({activeIncomeCategories.length}개)
+              </h4>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {activeIncomeCategories.map(cat => (
+                  <div
+                    key={cat.id}
+                    onClick={() => handleOpenEditModal(cat)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '6px 12px',
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '20px',
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                      color: '#fff',
+                    }}
+                  >
+                    <span>{cat.name}</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>({cat.owner || '공동'})</span>
+                    <Edit2 size={12} color="var(--accent-cyan)" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -14,7 +14,7 @@ const getCurrentYearMonth = () => {
 export function AppProvider({ children }) {
   const [db, setDb] = useState(() => loadDatabase());
   const [selectedMonth, setSelectedMonth] = useState(() => getCurrentYearMonth());
-  const [activeScenario, setActiveScenario] = useState('basic');
+  const [activeScenario, setActiveScenario] = useState(() => db.activeScenario || 'basic');
   const [isBackendLoaded, setIsBackendLoaded] = useState(false);
 
   // 현재 DB 내의 동적 자산 구조 (없으면 기본 시드 사용)
@@ -31,6 +31,9 @@ export function AppProvider({ children }) {
         const remoteDb = await loadDatabaseAsync();
         if (isMounted) {
           setDb(remoteDb);
+          if (remoteDb.activeScenario) {
+            setActiveScenario(remoteDb.activeScenario);
+          }
           setIsBackendLoaded(true);
         }
       } catch (err) {
@@ -314,8 +317,8 @@ export function AppProvider({ children }) {
 
   // 당월 종합 재무 지표 계산
   const currentMetrics = useMemo(() => {
-    return calculateMonthlyMetrics(db.transactions, selectedMonth, effectiveCategoryBudgets, db.categories);
-  }, [db.transactions, selectedMonth, effectiveCategoryBudgets, db.categories]);
+    return calculateMonthlyMetrics(db.transactions, selectedMonth, effectiveCategoryBudgets, db.categories, db.incomeCategories);
+  }, [db.transactions, selectedMonth, effectiveCategoryBudgets, db.categories, db.incomeCategories]);
 
   // 1월~12월 연간 집계 트렌드 계산
   const yearlyMetrics = useMemo(() => {
@@ -324,7 +327,7 @@ export function AppProvider({ children }) {
     
     return months.map(mStr => {
       const mBudgets = getEffectiveCategoryBudgets(mStr);
-      const mMetrics = calculateMonthlyMetrics(db.transactions, mStr, mBudgets, db.categories);
+      const mMetrics = calculateMonthlyMetrics(db.transactions, mStr, mBudgets, db.categories, db.incomeCategories);
       return {
         month: `${parseInt(mStr.split('-')[1])}월`,
         yearMonth: mStr,
@@ -340,7 +343,7 @@ export function AppProvider({ children }) {
         riskTop3: mMetrics.riskTop3,
       };
     });
-  }, [selectedMonth, db.transactions, getEffectiveCategoryBudgets, db.categories]);
+  }, [selectedMonth, db.transactions, getEffectiveCategoryBudgets, db.categories, db.incomeCategories]);
 
   // 1. 카테고리 동적 추가
   const addCategory = ({ name, defaultBudget, isFixed }) => {
@@ -550,6 +553,7 @@ export function AppProvider({ children }) {
 
       return {
         ...prev,
+        activeScenario: presetId,
         customBudgetPresets: {
           ...(prev.customBudgetPresets || {}),
           [presetId]: newPreset,
@@ -577,6 +581,7 @@ export function AppProvider({ children }) {
 
       return {
         ...prev,
+        activeScenario: nextKey,
         customBudgetPresets: updated,
       };
     });
@@ -605,24 +610,49 @@ export function AppProvider({ children }) {
 
         return {
           ...prev,
+          activeScenario: key,
           monthlyBudgets: updatedMonthly,
         };
       });
+    } else {
+      setDb(prev => ({
+        ...prev,
+        activeScenario: key,
+      }));
     }
   };
 
-  // 거래 CRUD 작업
+  // 거래 CRUD 작업 (category_id 자동 보장)
+  const resolveCategoryId = (tx) => {
+    if (tx.category_id) return tx.category_id;
+    const cat = (db.categories || []).find(c => c.name === tx.category);
+    if (cat && cat.id) return cat.id;
+    const inc = (db.incomeCategories || INCOME_CATEGORIES).find(i => i.name === tx.category);
+    if (inc && inc.id) return inc.id;
+    return '';
+  };
+
   const addTransaction = (newTx) => {
+    const txWithId = {
+      ...newTx,
+      category_id: resolveCategoryId(newTx),
+    };
     setDb(prev => ({
       ...prev,
-      transactions: [newTx, ...prev.transactions],
+      transactions: [txWithId, ...prev.transactions],
     }));
   };
 
   const updateTransaction = (id, updatedFields) => {
     setDb(prev => ({
       ...prev,
-      transactions: prev.transactions.map(t => t.id === id ? { ...t, ...updatedFields } : t),
+      transactions: prev.transactions.map(t => {
+        if (t.id === id) {
+          const merged = { ...t, ...updatedFields };
+          return { ...merged, category_id: resolveCategoryId(merged) };
+        }
+        return t;
+      }),
     }));
   };
 
@@ -641,9 +671,13 @@ export function AppProvider({ children }) {
   };
 
   const batchImportTransactions = (newTxs) => {
+    const preparedTxs = (newTxs || []).map(tx => ({
+      ...tx,
+      category_id: resolveCategoryId(tx),
+    }));
     setDb(prev => ({
       ...prev,
-      transactions: [...newTxs, ...prev.transactions],
+      transactions: [...preparedTxs, ...prev.transactions],
     }));
   };
 
@@ -736,6 +770,63 @@ export function AppProvider({ children }) {
     saveDatabase(importedDb);
   };
 
+  // 수입 카테고리 동적 CRUD
+  const addIncomeCategory = ({ name, owner }) => {
+    const trimmedName = String(name || '').trim();
+    if (!trimmedName) return { success: false, message: '수입 카테고리 이름을 입력해주세요.' };
+
+    const incomeList = db.incomeCategories || INCOME_CATEGORIES;
+    const exists = incomeList.some(c => c.name === trimmedName);
+    if (exists) return { success: false, message: '이미 존재하는 수입 카테고리 이름입니다.' };
+
+    const newId = `inc_user_${Date.now()}`;
+    const newCategory = {
+      id: newId,
+      name: trimmedName,
+      owner: owner || '가족공동',
+    };
+
+    setDb(prev => ({
+      ...prev,
+      incomeCategories: [...(prev.incomeCategories || INCOME_CATEGORIES), newCategory],
+    }));
+
+    return { success: true };
+  };
+
+  const updateIncomeCategory = (id, { name, owner }) => {
+    const trimmedName = String(name || '').trim();
+    if (!trimmedName) return { success: false, message: '수입 카테고리 이름을 입력해주세요.' };
+
+    setDb(prev => {
+      const incomeList = prev.incomeCategories || INCOME_CATEGORIES;
+      const updatedList = incomeList.map(c =>
+        c.id === id ? { ...c, name: trimmedName, owner: owner || '가족공동' } : c
+      );
+
+      return {
+        ...prev,
+        incomeCategories: updatedList,
+      };
+    });
+
+    return { success: true };
+  };
+
+  const deleteIncomeCategory = (id) => {
+    const incomeList = db.incomeCategories || INCOME_CATEGORIES;
+    if (incomeList.length <= 1) {
+      return { success: false, message: '최소 1개 이상의 수입 카테고리가 유지되어야 합니다.' };
+    }
+
+    setDb(prev => ({
+      ...prev,
+      incomeCategories: (prev.incomeCategories || INCOME_CATEGORIES).filter(c => c.id !== id),
+    }));
+
+    return { success: true };
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -769,6 +860,9 @@ export function AppProvider({ children }) {
         addCategory,
         updateCategory,
         deleteCategory,
+        addIncomeCategory,
+        updateIncomeCategory,
+        deleteIncomeCategory,
         assetStructure,
         addAssetItem,
         updateAssetItem,
