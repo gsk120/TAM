@@ -464,7 +464,17 @@ export default function AccountsView() {
                 </thead>
                 <tbody>
                   {investItems.map(item => {
-                    const val = snap.invest?.[item.id] ?? 0;
+                    let val = snap.invest?.[item.id];
+                    if (val === undefined && snap.invest) {
+                      if (item.id === 'inv_realestate_1' || item.name.includes('길음')) {
+                        val = snap.invest['inv_realestate'] ?? snap.invest['inv_realestate_1'];
+                      } else if (item.id === 'inv_realestate_2' || item.name.includes('종암')) {
+                        const matchingKey = Object.keys(snap.invest).find(k => (k.startsWith('inv_user_') || k === 'inv_realestate_2') && Number(snap.invest[k]) > 0);
+                        if (matchingKey) val = snap.invest[matchingKey];
+                      }
+                    }
+                    val = val ?? 0;
+
                     return (
                       <tr key={item.id}>
                         <td style={{ fontWeight: '600', color: '#fff' }}>

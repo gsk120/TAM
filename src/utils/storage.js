@@ -1,4 +1,4 @@
-import { DEFAULT_CATEGORIES, DEFAULT_ACCOUNTS, DEFAULT_ASSET_STRUCTURE, getInitialAssetSnapshot } from './finance';
+import { DEFAULT_CATEGORIES, DEFAULT_ACCOUNTS, DEFAULT_ASSET_STRUCTURE, getInitialAssetSnapshot, DEFAULT_INCOME_CATEGORIES } from './finance';
 
 const STORAGE_KEY = 'family_finance_db_v2';
 
@@ -31,6 +31,7 @@ export const DEFAULT_BASIC_PRESET = {
 export function getInitialDbStructure() {
   return {
     categories: DEFAULT_CATEGORIES,
+    incomeCategories: DEFAULT_INCOME_CATEGORIES,
     accounts: DEFAULT_ACCOUNTS,
     assetStructure: DEFAULT_ASSET_STRUCTURE,
     transactions: [],
@@ -94,40 +95,55 @@ function normalizeDbData(db) {
     });
   }
 
-  // 5. 자산 구조(assetStructure) 기본값 보장
-  if (!db.assetStructure || !db.assetStructure.cashItems || db.assetStructure.cashItems.length === 0) {
-    db.assetStructure = DEFAULT_ASSET_STRUCTURE;
+  // 5. 자산 구조(assetStructure) 기본값 및 복원 보장
+  let baseStruct = db.assetStructure || DEFAULT_ASSET_STRUCTURE;
+  if (!baseStruct || !baseStruct.cashItems || baseStruct.cashItems.length === 0) {
+    baseStruct = DEFAULT_ASSET_STRUCTURE;
   }
+
+  let investItems = Array.isArray(baseStruct.investItems) ? [...baseStruct.investItems] : [...INVEST_ASSET_ITEMS];
+  investItems = investItems.map(item => {
+    if (item.id === 'inv_realestate' && (item.name === '부동산' || !item.name)) {
+      return { ...item, name: '길음뉴타운 6단지', isRealEstate: true };
+    }
+    return item;
+  });
+
+  const knownIds = new Set(investItems.map(i => i.id));
+  if (db.monthlyAssetSnapshots && typeof db.monthlyAssetSnapshots === 'object') {
+    Object.values(db.monthlyAssetSnapshots).forEach(snap => {
+      if (snap && snap.invest && typeof snap.invest === 'object') {
+        Object.keys(snap.invest).forEach(k => {
+          if (!knownIds.has(k) && k.startsWith('inv_user_')) {
+            knownIds.add(k);
+            investItems.push({
+              id: k,
+              name: '종암 SK',
+              owner: '가족공동',
+              defaultBalance: 0,
+              isRealEstate: true,
+            });
+          }
+        });
+      }
+    });
+  }
+
+  db.assetStructure = {
+    cashItems: baseStruct.cashItems || CASH_ASSET_ITEMS,
+    investItems: investItems,
+    debtItems: baseStruct.debtItems || DEBT_ITEMS,
+  };
 
   return db;
 }
 
-// 동기식 동네 LocalStorage 읽기 (초기 React state용)
+// 기본 DB 데이터 구조 반환 (초기 React state용)
 export function loadDatabase() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const initialDb = normalizeDbData(getInitialDbStructure());
-      saveDatabase(initialDb);
-      return initialDb;
-    }
-    const db = normalizeDbData(JSON.parse(raw));
-    if (!db.categories) db.categories = DEFAULT_CATEGORIES;
-    if (!db.accounts) db.accounts = DEFAULT_ACCOUNTS;
-    if (!db.monthlyAssetSnapshots) {
-      db.monthlyAssetSnapshots = { '2026-07': getInitialAssetSnapshot() };
-    }
-    if (!db.customBudgetPresets || Object.keys(db.customBudgetPresets).length === 0) {
-      db.customBudgetPresets = { basic: DEFAULT_BASIC_PRESET };
-    }
-    return db;
-  } catch (err) {
-    console.error('Failed to load storage, initializing fallback:', err);
-    return normalizeDbData(getInitialDbStructure());
-  }
+  return normalizeDbData(getInitialDbStructure());
 }
 
-// 비동기 백엔드 API (Node.js Express + SQLite) 데이터 로드 및 마이그레이션
+// 비동기 Supabase PostgreSQL 데이터 로드
 export async function loadDatabaseAsync() {
   try {
     const res = await fetch('/api/db');
@@ -136,49 +152,23 @@ export async function loadDatabaseAsync() {
     }
     const serverDb = await res.json();
 
-    // 서버 DB 데이터 유무 검사
-    const hasServerData =
-      (serverDb.transactions && serverDb.transactions.length > 0) ||
-      (serverDb.monthlyAssetSnapshots && Object.keys(serverDb.monthlyAssetSnapshots).length > 0) ||
-      (serverDb.monthlyBudgets && Object.keys(serverDb.monthlyBudgets).length > 0);
-
-    // 서버 DB가 비어있는 경우, 기존 LocalStorage 데이터 마이그레이션 확인
-    if (!hasServerData) {
-      const localDb = loadDatabase();
-      const hasLocalData =
-        (localDb.transactions && localDb.transactions.length > 0) ||
-        (localDb.monthlyAssetSnapshots && Object.keys(localDb.monthlyAssetSnapshots).length > 0);
-
-      if (hasLocalData) {
-        console.log('📦 Migrating LocalStorage data to SQLite server...');
-        await saveDatabaseToServer(localDb);
-        return localDb;
-      }
-    }
-
-    // 서버 데이터를 기본 구조로 병합
     const mergedDb = normalizeDbData({
-      categories: serverDb.categories || DEFAULT_CATEGORIES,
+      categories: (Array.isArray(serverDb.categories) && serverDb.categories.length > 0) ? serverDb.categories : DEFAULT_CATEGORIES,
+      incomeCategories: (Array.isArray(serverDb.incomeCategories) && serverDb.incomeCategories.length > 0) ? serverDb.incomeCategories : DEFAULT_INCOME_CATEGORIES,
       accounts: serverDb.accounts || DEFAULT_ACCOUNTS,
       transactions: serverDb.transactions || [],
       monthlyBudgets: serverDb.monthlyBudgets || {},
-      monthlyAssetSnapshots: serverDb.monthlyAssetSnapshots || { '2026-07': getInitialAssetSnapshot() },
-      customBudgetPresets:
-        serverDb.customBudgetPresets && Object.keys(serverDb.customBudgetPresets).length > 0
-          ? serverDb.customBudgetPresets
-          : { basic: DEFAULT_BASIC_PRESET },
+      monthlyAssetSnapshots: serverDb.monthlyAssetSnapshots || { '2026-07': getInitialAssetSnapshot(DEFAULT_ASSET_STRUCTURE) },
+      customBudgetPresets: (serverDb.customBudgetPresets && Object.keys(serverDb.customBudgetPresets).length > 0)
+        ? serverDb.customBudgetPresets
+        : { basic: DEFAULT_BASIC_PRESET },
       activeScenario: serverDb.activeScenario || 'basic',
       assetStructure: serverDb.assetStructure || null,
     });
 
-    // LocalStorage도 최신으로 동기화
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedDb));
-    } catch (e) {}
-
     return mergedDb;
   } catch (err) {
-    console.warn('⚠️ Server unavailable or error, falling back to LocalStorage:', err);
+    console.warn('⚠️ Server unavailable or error, falling back to default structure:', err);
     return loadDatabase();
   }
 }
@@ -199,19 +189,44 @@ async function saveDatabaseToServer(db) {
 }
 
 let syncTimeout = null;
+let pendingDbToSync = null;
 
-export function saveDatabase(db) {
-  // 1. LocalStorage 즉시 저장
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-  } catch (err) {
-    console.error('Failed to save to localStorage:', err);
+export function flushDatabaseSync() {
+  if (syncTimeout) {
+    clearTimeout(syncTimeout);
+    syncTimeout = null;
   }
+  if (pendingDbToSync) {
+    const dataToSync = pendingDbToSync;
+    pendingDbToSync = null;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        const blob = new Blob([JSON.stringify(dataToSync)], { type: 'application/json' });
+        navigator.sendBeacon('/api/db/sync', blob);
+      } else {
+        saveDatabaseToServer(dataToSync);
+      }
+    } catch (e) {
+      console.error('Flush sync failed:', e);
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    flushDatabaseSync();
+  });
+}
+
+// Supabase DB 저장 (300ms 디바운스 백엔드 디스크 동기화)
+export function saveDatabase(db) {
+  pendingDbToSync = db;
 
   // 2. 백엔드 SQLite DB 디바운스 디스크 동기화 (300ms)
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
     saveDatabaseToServer(db);
+    pendingDbToSync = null;
   }, 300);
 }
 

@@ -45,32 +45,12 @@ app.post('/api/db/sync', async (req, res) => {
   }
 });
 
-// 3. LocalStorage 마이그레이션 API
-app.post('/api/migrate', async (req, res) => {
-  try {
-    const localDb = req.body;
-    if (!localDb || typeof localDb !== 'object') {
-      return res.status(400).json({ error: 'Invalid migration data' });
-    }
-    await syncFullDatabase(localDb);
-    res.json({ success: true, message: 'LocalStorage migrated successfully' });
-  } catch (err) {
-    console.error('Migration failed:', err);
-    res.status(500).json({ error: 'Migration failed', details: err.message });
-  }
-});
-
-// 4. 가계부 거래 CRUD API
+// 3. 가계부 거래 CRUD API (Supabase PostgreSQL 전용)
 app.get('/api/transactions', async (req, res) => {
   try {
     const db = await getDb();
-    if (getIsPostgres()) {
-      const resData = await db.query('SELECT * FROM transactions ORDER BY date DESC, id DESC');
-      res.json(resData.rows);
-    } else {
-      const rows = await db.all('SELECT * FROM transactions ORDER BY date DESC, id DESC');
-      res.json(rows);
-    }
+    const resData = await db.query('SELECT * FROM transactions ORDER BY date DESC, id DESC');
+    res.json(resData.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -86,6 +66,7 @@ app.post('/api/transactions', async (req, res) => {
       t.date || '',
       Number(t.amount) || 0,
       t.category || '',
+      t.category_id || '',
       t.subcategory || '',
       t.type || '소비',
       t.description || '',
@@ -97,19 +78,11 @@ app.post('/api/transactions', async (req, res) => {
       t.created_at || new Date().toISOString(),
     ];
 
-    if (getIsPostgres()) {
-      await db.query(
-        `INSERT INTO transactions (id, date, amount, category, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        params
-      );
-    } else {
-      await db.run(
-        `INSERT INTO transactions (id, date, amount, category, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params
-      );
-    }
+    await db.query(
+      `INSERT INTO transactions (id, date, amount, category, category_id, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      params
+    );
     res.json({ success: true, id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -119,11 +92,7 @@ app.post('/api/transactions', async (req, res) => {
 app.delete('/api/transactions/:id', async (req, res) => {
   try {
     const db = await getDb();
-    if (getIsPostgres()) {
-      await db.query('DELETE FROM transactions WHERE id = $1', [req.params.id]);
-    } else {
-      await db.run('DELETE FROM transactions WHERE id = ?', [req.params.id]);
-    }
+    await db.query('DELETE FROM transactions WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
