@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext';
 import Navbar from './components/Navbar';
 import Dashboard from './components/Dashboard';
 import TransactionsView from './components/TransactionsView';
@@ -7,9 +7,15 @@ import BudgetView from './components/BudgetView';
 import IncomeView from './components/IncomeView';
 import AccountsView from './components/AccountsView';
 import SettingsView from './components/SettingsView';
+import AuthView from './components/AuthView';
 
 function MainApp() {
+  const { isAuthenticated, login, register } = useApp();
   const [activeTab, setActiveTab] = useState('dashboard');
+
+  if (!isAuthenticated) {
+    return <AuthView onLogin={login} onRegister={register} />;
+  }
 
   return (
     <div className="app-container">
@@ -25,7 +31,7 @@ function MainApp() {
       </main>
 
       <footer style={{ borderTop: '1px solid var(--border-color)', padding: '20px 24px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dim)', background: 'rgba(15, 23, 42, 0.8)' }}>
-        가족 가계부 및 자산관리 프로그램 P0 MVP v1.0 | PRD 및 엑셀 템플릿(2026 승주 기석 가계부) 100% 반영
+        부부 통합 자산관리 프로그램 | 다중 계정 및 가구 구성원 동적 관리 지원
       </footer>
     </div>
   );
@@ -38,3 +44,4 @@ export default function App() {
     </AppProvider>
   );
 }
+

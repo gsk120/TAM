@@ -5,8 +5,9 @@ import { formatKRW } from '../utils/finance';
 import { X, UploadCloud, AlertCircle, CheckCircle2, ShieldAlert, ShieldCheck } from 'lucide-react';
 
 export default function ImportModal({ onClose }) {
-  const { db, batchImportTransactions } = useApp();
+  const { db, batchImportTransactions, familyMembers } = useApp();
 
+  const [selectedOwner, setSelectedOwner] = useState(() => (familyMembers && familyMembers.length > 0 ? familyMembers[0].name : '기석'));
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [candidates, setCandidates] = useState(null); // 중복 탐지 완료된 거래 항목
@@ -14,6 +15,16 @@ export default function ImportModal({ onClose }) {
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // 스마트 파일명 감지 (파일명에 가족 구성원 이름이 들어있으면 소유자 자동 변경)
+    let activeOwner = selectedOwner;
+    if (familyMembers && familyMembers.length > 0) {
+      const matched = familyMembers.find(m => file.name.includes(m.name));
+      if (matched) {
+        activeOwner = matched.name;
+        setSelectedOwner(matched.name);
+      }
+    }
 
     setIsLoading(true);
     setErrorMsg(null);
@@ -26,8 +37,14 @@ export default function ImportModal({ onClose }) {
         return;
       }
 
+      // 엑셀에서 추출된 거래 내역 전체에 선택된 owner 지정
+      const txsWithOwner = parsedTxs.map(tx => ({
+        ...tx,
+        owner: activeOwner,
+      }));
+
       // 중복 탐지 실행
-      const evaluated = detectDuplicates(parsedTxs, db.transactions);
+      const evaluated = detectDuplicates(txsWithOwner, db.transactions);
       setCandidates(evaluated);
     } catch (err) {
       console.error('File parse error:', err);
@@ -76,15 +93,53 @@ export default function ImportModal({ onClose }) {
           </button>
         </div>
 
+        {/* 소유자 일괄 선택 세그먼트 버튼 */}
+        {!candidates && (
+          <div style={{ background: 'rgba(30, 41, 59, 0.7)', padding: '14px 18px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '700', color: '#fff', marginBottom: '8px' }}>
+              👤 이 엑셀 파일의 거래 소유자(Owner)를 선택하세요:
+            </label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {(familyMembers || [{ id: 'm1', name: '기석', color: '#3b82f6' }, { id: 'm2', name: '승주', color: '#ec4899' }, { id: 'm3', name: '가족공동', color: '#10b981' }]).map(m => {
+                const isSelected = selectedOwner === m.name;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSelectedOwner(m.name)}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: isSelected ? `2px solid ${m.color || '#3b82f6'}` : '1px solid rgba(255, 255, 255, 0.15)',
+                      background: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'rgba(15, 23, 42, 0.6)',
+                      color: isSelected ? '#fff' : 'var(--text-muted)',
+                      fontWeight: isSelected ? '700' : '500',
+                      fontSize: '0.88rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: m.color || '#3b82f6' }} />
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* 파일 선택 영역 */}
         {!candidates && (
-          <div style={{ border: '2px dashed var(--border-highlight)', borderRadius: 'var(--radius-md)', padding: '40px', textAlign: 'center', background: 'rgba(15, 23, 42, 0.5)', margin: '20px 0' }}>
+          <div style={{ border: '2px dashed var(--border-highlight)', borderRadius: 'var(--radius-md)', padding: '40px', textAlign: 'center', background: 'rgba(15, 23, 42, 0.5)', margin: '10px 0 20px 0' }}>
             <UploadCloud size={48} color="var(--accent-cyan)" style={{ marginBottom: '12px' }} />
             <h4 style={{ fontSize: '1.1rem', fontWeight: '600', color: '#fff', marginBottom: '8px' }}>
               뱅크샐러드 또는 가계부 엑셀/CSV 파일 선택
             </h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              A:날짜, B:타입, C:대분류, D:내용, E:금액, F:비고(의료비 보험받음 등) 포맷을 지원합니다.
+              선택된 소유자 [<strong style={{ color: 'var(--accent-cyan)' }}>{selectedOwner}</strong>] 소유로 엑셀 내 모든 거래가 일괄 등록됩니다.
             </p>
             <input
               type="file"
@@ -96,10 +151,11 @@ export default function ImportModal({ onClose }) {
             <label htmlFor="excel-file-input" className="btn btn-primary" style={{ cursor: 'pointer' }}>
               파일 탐색기에서 파일 선택
             </label>
-            {isLoading && <p style={{ marginTop: '12px', color: 'var(--accent-cyan)' }}>파일 분석 중...</p>}
+            {isLoading && <p style={{ marginTop: '12px', color: 'var(--accent-cyan)' }}>파일 분석 및 [{selectedOwner}] 매핑 중...</p>}
             {errorMsg && <p style={{ marginTop: '12px', color: 'var(--accent-rose)' }}>⚠️ {errorMsg}</p>}
           </div>
         )}
+
 
         {/* 중복 탐지 미리보기 및 최종 확인 표 */}
         {candidates && (

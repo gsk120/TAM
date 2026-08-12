@@ -4,7 +4,7 @@ import { formatKRW, DEFAULT_INCOME_CATEGORIES } from '../utils/finance';
 import { Plus, Edit2, Trash2, X, ChevronDown, Info } from 'lucide-react';
 
 export default function IncomeView() {
-  const { db, currentMetrics, yearlyMetrics, selectedMonth, addIncomeCategory, updateIncomeCategory, deleteIncomeCategory } = useApp();
+  const { db, currentMetrics, yearlyMetrics, selectedMonth, addIncomeCategory, updateIncomeCategory, deleteIncomeCategory, familyMembers } = useApp();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -124,41 +124,23 @@ export default function IncomeView() {
           </div>
         </div>
 
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>기석 수입 합계</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-            {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, '기석'))}
+        {/* 소유자별 동적 카드 */}
+        {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+          <div key={m.id} className="glass-card" style={{ padding: '20px' }}>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: m.color || '#3b82f6' }} />
+              {m.name} 수입 합계
+            </div>
+            <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
+              {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, m.name))}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+              {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, m.name)
+                .map(b => `${b.name}: ${formatKRW(b.amount)}`)
+                .join(' | ') || '내역 없음'}
+            </div>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, '기석')
-              .map(b => `${b.name}: ${formatKRW(b.amount)}`)
-              .join(' | ')}
-          </div>
-        </div>
-
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>승주 수입 합계</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff', marginTop: '4px' }}>
-            {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, '승주'))}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, '승주')
-              .map(b => `${b.name}: ${formatKRW(b.amount)}`)
-              .join(' | ')}
-          </div>
-        </div>
-
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>기타 / 공동 수입</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: '700', color: 'var(--accent-cyan)', marginTop: '4px' }}>
-            {formatKRW(getOwnerIncomeTotal(currentMetrics.incomeMap || {}, '가족공동'))}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            {getOwnerCategoryBreakdown(currentMetrics.incomeMap || {}, '가족공동')
-              .map(b => `${b.name}: ${formatKRW(b.amount)}`)
-              .join(' | ')}
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* 연간 수입 표 & 뷰 스위처 */}
@@ -174,22 +156,18 @@ export default function IncomeView() {
               className={`btn btn-sm ${viewTab === 'compact' ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setViewTab('compact')}
             >
-              📊 전체 요약 (5컬럼)
+              📊 전체 요약
             </button>
 
-            <button
-              className={`btn btn-sm ${viewTab === 'giseok' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setViewTab('giseok')}
-            >
-              🙋‍♂️ 기석 상세
-            </button>
-
-            <button
-              className={`btn btn-sm ${viewTab === 'seungju' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setViewTab('seungju')}
-            >
-              🙋‍♀️ 승주 상세
-            </button>
+            {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }]).slice(0, 2).map(m => (
+              <button
+                key={m.id}
+                className={`btn btn-sm ${viewTab === m.id ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setViewTab(m.id)}
+              >
+                👤 {m.name} 상세
+              </button>
+            ))}
 
             <button
               className={`btn btn-sm ${viewTab === 'all' ? 'btn-primary' : 'btn-secondary'}`}
@@ -199,6 +177,7 @@ export default function IncomeView() {
             </button>
           </div>
         </div>
+
 
         {/* 안내 얼럿 */}
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -390,9 +369,9 @@ export default function IncomeView() {
                   value={ownerInput}
                   onChange={e => setOwnerInput(e.target.value)}
                 >
-                  <option value="기석">기석 수입</option>
-                  <option value="승주">승주 수입</option>
-                  <option value="가족공동">기타 / 가족공동 수입</option>
+                  {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                    <option key={m.id} value={m.name}>{m.name} 수입</option>
+                  ))}
                 </select>
               </div>
 
