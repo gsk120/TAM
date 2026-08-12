@@ -17,42 +17,157 @@ export function AppProvider({ children }) {
   const [activeScenario, setActiveScenario] = useState(() => db.activeScenario || 'basic');
   const [isBackendLoaded, setIsBackendLoaded] = useState(false);
 
+  // 인증 관련 전역 상태
+  const [token, setToken] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('finance_app_token') || '' : ''));
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // 가족 구성원 목록 (DB의 familyMembers 또는 기본값)
+  const familyMembers = useMemo(() => {
+    if (Array.isArray(db.familyMembers) && db.familyMembers.length > 0) {
+      return db.familyMembers;
+    }
+    return [
+      { id: 'm1', name: '기석', color: '#3b82f6' },
+      { id: 'm2', name: '승주', color: '#ec4899' },
+      { id: 'm3', name: '가족공동', color: '#10b981' },
+    ];
+  }, [db.familyMembers]);
+
   // 현재 DB 내의 동적 자산 구조 (없으면 기본 시드 사용)
   const assetStructure = db.assetStructure || DEFAULT_ASSET_STRUCTURE;
   const cashList = assetStructure.cashItems || CASH_ASSET_ITEMS;
   const investList = assetStructure.investItems || INVEST_ASSET_ITEMS;
   const debtList = assetStructure.debtItems || DEBT_ITEMS;
 
-  // 컴포넌트 마운트 시 백엔드 Node.js + SQLite 데이터베이스 비동기 연동 및 로드
+  // 컴포넌트 마운트 시 세션 검증 및 DB 로드
   useEffect(() => {
     let isMounted = true;
-    async function fetchBackendData() {
+    async function initAuthAndDb() {
+      const storedToken = localStorage.getItem('finance_app_token');
+      if (!storedToken) {
+        if (isMounted) setIsBackendLoaded(true);
+        return;
+      }
+
       try {
-        const remoteDb = await loadDatabaseAsync();
+        const meRes = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${storedToken}` },
+        });
+
+        if (!meRes.ok) {
+          throw new Error('Session expired');
+        }
+
+        const userData = await meRes.json();
+        if (isMounted) {
+          setToken(storedToken);
+          setUser(userData);
+          setIsAuthenticated(true);
+        }
+
+        const remoteDb = await loadDatabaseAsync(storedToken);
         if (isMounted) {
           setDb(remoteDb);
           if (remoteDb.activeScenario) {
             setActiveScenario(remoteDb.activeScenario);
           }
+          if (remoteDb.userInfo) {
+            setUser(prev => ({ ...prev, ...remoteDb.userInfo }));
+          }
           setIsBackendLoaded(true);
         }
       } catch (err) {
-        console.error('Failed to load DB from backend:', err);
-        if (isMounted) setIsBackendLoaded(true);
+        console.warn('Authentication check failed:', err.message);
+        localStorage.removeItem('finance_app_token');
+        if (isMounted) {
+          setToken('');
+          setUser(null);
+          setIsAuthenticated(false);
+          setIsBackendLoaded(true);
+        }
       }
     }
-    fetchBackendData();
+
+    initAuthAndDb();
     return () => {
       isMounted = false;
     };
   }, []);
 
-  // DB 변경 시 localStorage 및 백엔드 SQLite 자동 저장
+  // DB 변경 시 backend 디바운스 자동 동기화
   useEffect(() => {
-    if (isBackendLoaded) {
-      saveDatabase(db);
+    if (isBackendLoaded && isAuthenticated && token) {
+      saveDatabase(db, token);
     }
-  }, [db, isBackendLoaded]);
+  }, [db, isBackendLoaded, isAuthenticated, token]);
+
+  // 로그인 핸들러
+  const login = async (username, password) => {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || '로그인에 실패했습니다.');
+    }
+
+    localStorage.setItem('finance_app_token', data.token);
+    setToken(data.token);
+    setUser(data.user);
+    setIsAuthenticated(true);
+
+    // 데이터 로드
+    const remoteDb = await loadDatabaseAsync(data.token);
+    setDb(remoteDb);
+    if (remoteDb.activeScenario) setActiveScenario(remoteDb.activeScenario);
+    return data;
+  };
+
+  // 회원가입 핸들러
+  const register = async (formData) => {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || '회원가입에 실패했습니다.');
+    }
+
+    localStorage.setItem('finance_app_token', data.token);
+    setToken(data.token);
+    setUser(data.user);
+    setIsAuthenticated(true);
+
+    const remoteDb = await loadDatabaseAsync(data.token);
+    setDb(remoteDb);
+    if (remoteDb.activeScenario) setActiveScenario(remoteDb.activeScenario);
+    return data;
+  };
+
+  // 로그아웃 핸들러
+  const logout = () => {
+    localStorage.removeItem('finance_app_token');
+    setToken('');
+    setUser(null);
+    setIsAuthenticated(false);
+    setDb(loadDatabase());
+  };
+
+  // 가족 구성원 목록 업데이트 핸들러
+  const updateFamilyMembers = (newMembers) => {
+    setDb(prev => ({
+      ...prev,
+      familyMembers: newMembers,
+    }));
+  };
+
 
   // 특정 월의 자산 수기 데이터 조회 (없으면 독립 초기값 0 사용)
   const getAssetSnapshot = (yearMonth) => {
@@ -830,6 +945,14 @@ export function AppProvider({ children }) {
   return (
     <AppContext.Provider
       value={{
+        token,
+        user,
+        isAuthenticated,
+        familyMembers,
+        login,
+        register,
+        logout,
+        updateFamilyMembers,
         db,
         selectedMonth,
         setSelectedMonth,
@@ -872,6 +995,7 @@ export function AppProvider({ children }) {
       {children}
     </AppContext.Provider>
   );
+
 }
 
 export function useApp() {

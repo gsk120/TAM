@@ -1,9 +1,11 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { LayoutDashboard, ReceiptText, PieChart, Wallet, Landmark, Settings, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, ReceiptText, PieChart, Wallet, Landmark, Settings, Calendar, ChevronLeft, ChevronRight, LogOut, User } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab }) {
-  const { selectedMonth, setSelectedMonth } = useApp();
+  const { selectedMonth, setSelectedMonth, user, logout, db } = useApp();
+
+  const householdName = user?.householdName || db?.userInfo?.householdName || '기석 & 승주 가족 가계부';
 
   const navItems = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
@@ -43,17 +45,16 @@ export default function Navbar({ activeTab, setActiveTab }) {
           </div>
           <div>
             <h1 style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-              승주 & 기석 가족 가계부
+              {householdName}
             </h1>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>4인 가족 통합 자산관리</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>부부 통합 자산관리 프로그램</span>
           </div>
         </div>
 
-        {/* 다년도 스마트 피벗 2단계 연도/월 컨트롤 (옵션 A) */}
+        {/* 다년도 피벗 연도/월 컨트롤 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(30, 41, 59, 0.7)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
           <Calendar size={18} color="var(--accent-cyan)" />
           
-          {/* 연도 피벗 컨트롤 (◀ YYYY년 ▶) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: 'rgba(15, 23, 42, 0.6)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
             <button
               onClick={handlePrevYear}
@@ -74,7 +75,6 @@ export default function Navbar({ activeTab, setActiveTab }) {
             </button>
           </div>
 
-          {/* 월 선택 드롭다운 */}
           <select
             value={currentMonthNum}
             onChange={(e) => handleMonthChange(e.target.value)}
@@ -91,38 +91,68 @@ export default function Navbar({ activeTab, setActiveTab }) {
           </select>
         </div>
 
-        {/* 네비게이션 탭 */}
-        <nav style={{ display: 'flex', gap: '6px', background: 'rgba(15,23,42,0.6)', padding: '4px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-          {navItems.map(item => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  border: 'none',
-                  fontSize: '0.85rem',
-                  fontWeight: isActive ? '600' : '500',
-                  color: isActive ? '#fff' : 'var(--text-muted)',
-                  background: isActive ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
-                  boxShadow: isActive ? '0 2px 8px rgba(59, 130, 246, 0.4)' : 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <Icon size={16} />
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
+        {/* 네비게이션 탭 & 사용자 프로필 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <nav style={{ display: 'flex', gap: '6px', background: 'rgba(15,23,42,0.6)', padding: '4px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+            {navItems.map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '8px 14px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '0.85rem',
+                    fontWeight: isActive ? '600' : '500',
+                    color: isActive ? '#fff' : 'var(--text-muted)',
+                    background: isActive ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
+                    boxShadow: isActive ? '0 2px 8px rgba(59, 130, 246, 0.4)' : 'none',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <Icon size={16} />
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* 프로필 & 로그아웃 버튼 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: '#fff', fontWeight: '600' }}>
+              <User size={15} color="var(--accent-cyan)" />
+              <span>{user?.username || 'togom'}</span>
+            </div>
+            <button
+              onClick={logout}
+              style={{
+                background: 'rgba(244, 63, 94, 0.15)',
+                border: '1px solid rgba(244, 63, 94, 0.3)',
+                borderRadius: '6px',
+                color: '#fda4af',
+                padding: '4px 8px',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+              title="로그아웃"
+            >
+              <LogOut size={13} /> 로그아웃
+            </button>
+          </div>
+        </div>
       </div>
     </header>
   );
 }
+

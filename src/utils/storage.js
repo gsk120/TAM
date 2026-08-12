@@ -144,15 +144,25 @@ export function loadDatabase() {
 }
 
 // 비동기 Supabase PostgreSQL 데이터 로드
-export async function loadDatabaseAsync() {
+export async function loadDatabaseAsync(token) {
   try {
-    const res = await fetch('/api/db');
+    const headers = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    } else {
+      const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('finance_app_token') : null;
+      if (storedToken) headers['Authorization'] = `Bearer ${storedToken}`;
+    }
+
+    const res = await fetch('/api/db', { headers });
     if (!res.ok) {
       throw new Error(`Server returned ${res.status}`);
     }
     const serverDb = await res.json();
 
     const mergedDb = normalizeDbData({
+      userInfo: serverDb.userInfo || null,
+      familyMembers: serverDb.familyMembers || null,
       categories: (Array.isArray(serverDb.categories) && serverDb.categories.length > 0) ? serverDb.categories : DEFAULT_CATEGORIES,
       incomeCategories: (Array.isArray(serverDb.incomeCategories) && serverDb.incomeCategories.length > 0) ? serverDb.incomeCategories : DEFAULT_INCOME_CATEGORIES,
       accounts: serverDb.accounts || DEFAULT_ACCOUNTS,
@@ -174,13 +184,19 @@ export async function loadDatabaseAsync() {
 }
 
 // 서버 DB에 동기화 요청
-async function saveDatabaseToServer(db) {
+async function saveDatabaseToServer(db, token) {
   try {
+    const headers = {
+      'Content-Type': 'application/json',
+    };
+    const authToken = token || (typeof localStorage !== 'undefined' ? localStorage.getItem('finance_app_token') : null);
+    if (authToken) {
+      headers['Authorization'] = `Bearer ${authToken}`;
+    }
+
     await fetch('/api/db/sync', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(db),
     });
   } catch (err) {
@@ -191,7 +207,7 @@ async function saveDatabaseToServer(db) {
 let syncTimeout = null;
 let pendingDbToSync = null;
 
-export function flushDatabaseSync() {
+export function flushDatabaseSync(token) {
   if (syncTimeout) {
     clearTimeout(syncTimeout);
     syncTimeout = null;
@@ -200,12 +216,7 @@ export function flushDatabaseSync() {
     const dataToSync = pendingDbToSync;
     pendingDbToSync = null;
     try {
-      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-        const blob = new Blob([JSON.stringify(dataToSync)], { type: 'application/json' });
-        navigator.sendBeacon('/api/db/sync', blob);
-      } else {
-        saveDatabaseToServer(dataToSync);
-      }
+      saveDatabaseToServer(dataToSync, token);
     } catch (e) {
       console.error('Flush sync failed:', e);
     }
@@ -219,13 +230,12 @@ if (typeof window !== 'undefined') {
 }
 
 // Supabase DB 저장 (300ms 디바운스 백엔드 디스크 동기화)
-export function saveDatabase(db) {
+export function saveDatabase(db, token) {
   pendingDbToSync = db;
 
-  // 2. 백엔드 SQLite DB 디바운스 디스크 동기화 (300ms)
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
-    saveDatabaseToServer(db);
+    saveDatabaseToServer(db, token);
     pendingDbToSync = null;
   }, 300);
 }
@@ -236,3 +246,4 @@ export function resetDatabase() {
   saveDatabase(initialDb);
   return initialDb;
 }
+

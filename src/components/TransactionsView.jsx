@@ -6,7 +6,7 @@ import ImportModal from './ImportModal';
 import SplitModal from './SplitModal';
 
 export default function TransactionsView() {
-  const { db, selectedMonth, addTransaction, updateTransaction, deleteTransaction, deleteMonthTransactions } = useApp();
+  const { db, selectedMonth, addTransaction, updateTransaction, deleteTransaction, deleteMonthTransactions, familyMembers } = useApp();
 
   // 컬럼별 엑셀 스타일 필터 상태
   const [filterDate, setFilterDate] = useState('ALL');
@@ -261,11 +261,9 @@ export default function TransactionsView() {
               <th>
                 <select className="select" style={{ fontSize: '0.75rem', padding: '4px' }} value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
                   <option value="ALL">전체 귀속</option>
-                  <option value="가족공동">가족공동</option>
-                  <option value="기석">기석</option>
-                  <option value="승주">승주</option>
-                  <option value="서아">서아</option>
-                  <option value="서빈">서빈</option>
+                  {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                    <option key={m.id} value={m.name}>{m.name}</option>
+                  ))}
                 </select>
               </th>
 
@@ -478,11 +476,9 @@ export default function TransactionsView() {
                 <div>
                   <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>귀속 구성원</label>
                   <select className="select" value={formTx.owner} onChange={e => setFormTx({ ...formTx, owner: e.target.value })}>
-                    <option value="가족공동">가족공동</option>
-                    <option value="기석">기석</option>
-                    <option value="승주">승주</option>
-                    <option value="서아">서아</option>
-                    <option value="서빈">서빈</option>
+                    {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                      <option key={m.id} value={m.name}>{m.name}</option>
+                    ))}
                   </select>
                 </div>
 

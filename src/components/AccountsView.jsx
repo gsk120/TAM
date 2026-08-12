@@ -40,6 +40,7 @@ export default function AccountsView() {
     addAssetItem,
     updateAssetItem,
     deleteAssetItem,
+    familyMembers,
   } = useApp();
 
   const cashItems = assetStructure?.cashItems || CASH_ASSET_ITEMS;
@@ -1145,9 +1146,9 @@ export default function AccountsView() {
                   onChange={e => setAssetForm(prev => ({ ...prev, owner: e.target.value }))}
                   style={{ width: '100%' }}
                 >
-                  <option value="기석">기석</option>
-                  <option value="승주">승주</option>
-                  <option value="가족공동">가족공동</option>
+                  {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                    <option key={m.id} value={m.name}>{m.name}</option>
+                  ))}
                 </select>
               </div>
 
