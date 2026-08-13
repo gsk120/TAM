@@ -2387,6 +2387,53 @@ PRD의 확정 요구사항과 미확정 사항을 구분하고,
   - **아이디 (`username`)**: `togom`
   - **비밀번호 (`password`)**: `1122` (운영 마이그레이션 시 암호화 저장)
   - **가계부 명칭 (`household_name`)**: `기석 & 승주 가족 가계부`
-  - **초기 가족 구성원 (`family_members`)**: `['기석', '승주', '가족공동']`
+  - **초기 가족 구성원 (`family_members`)**: `['기석', '승주', '가족공동']` (마이그레이션 대상 `togom` 계정 전용)
 - **이관 처리**:
   - DB 구조 변경(컬럼 추가) 후 기존에 수집되어 있던 모든 거래, 예산, 자산 데이터의 `user_id`를 위 `togom` 계정 고유 ID로 일괄 자동 할당함.
+
+## 40.4 인증 화면 UX 개선 및 신규 계정 가족 구성원 데이터 바인딩 명세 (1, 2, 5번 요구사항)
+
+1. **로그인 화면 예시 문구 정제 (1번)**:
+   - 로그인 폼(`AuthView.jsx`)의 아이디 입력 필드 `placeholder`에서 특정 사용자명인 `togom` 표기를 삭제하고 `"아이디를 입력하세요"`로 정제.
+2. **회원가입 화면 범용 가족 구성원 예시 적용 (2번)**:
+   - 회원가입 폼의 초기 가족 구성원 입력 안내 예시 문구 및 state 초기값을 기존 특정 사용자 이름(`기석, 승주, 가족공동`) 대신 범용 예시인 `남편, 아내, 가족공동`으로 변경.
+3. **신규 가입 시 가족 구성원 저장 및 fallback 기본값 격리 (5번)**:
+   - 회원가입 시 사용자가 입력한 `initial_members`가 신규 계정의 `settings` (`familyMembers`)에 정상 저장되도록 구성.
+   - 입력값이 없거나 fallback 동작 시 기존 하드코딩된 `기석, 승주` 대신 `남편, 아내, 가족공동`이 기본값으로 사용되도록 처리하여 불필요한 마이그레이션용 이름 노출 방지.
+
+## 40.5 다중 계정 데이터 격리를 위한 DB 복합 기본키(Composite PK) 전환 명세 (3, 5번 근본 원인 해결)
+
+1. **배경 및 원인 분석**:
+   - 기존 `settings`, `monthly_budgets`, `monthly_assets`, `custom_budget_presets` 테이블의 기본키(PK)가 단일 컬럼(`key`, `year_month`, `id`)으로 지정되어 있어, 타 계정이 동일한 키값을 저장할 때 `duplicate key value violates unique constraint` 오류 발생.
+   - 이로 인해 신규 회원가입 시 에러가 표출되며, 가족 구성원(`familyMembers`) 저장이 실패하여 로그인 시 설정값이 노출되지 않는 문제 원천 차단.
+
+2. **DB 테이블 복합 기본키(Composite Primary Key) 변경 명세**:
+   - **`transactions` 테이블**: `PRIMARY KEY (user_id, id)` 복합키 전환 및 `user_id` 인덱스 생성 (거래 ID 유니크 격리 및 검색 속도 향상).
+   - **`settings` 테이블**: `PRIMARY KEY (user_id, key)` 복합키 전환.
+   - **`monthly_budgets` 테이블**: `PRIMARY KEY (user_id, year_month)` 복합키 전환.
+   - **`monthly_assets` 테이블**: `PRIMARY KEY (user_id, year_month)` 복합키 전환.
+   - **`custom_budget_presets` 테이블**: `PRIMARY KEY (user_id, id)` 복합키 전환.
+
+3. **자동 DDL 마이그레이션 & 쿼리 처리 명세**:
+   - 백엔드DB 초기화 시 기존 단일 기본키 제약조건(`settings_pkey`, `monthly_budgets_pkey` 등)을 제거(`DROP CONSTRAINT IF EXISTS`)하고 계정별 복합 기본키를 자동 재설정.
+   - `createUser` 및 `syncFullDatabase` 실행 시 `ON CONFLICT (user_id, key) DO UPDATE ...` 구문을 적용하여 계정 간 데이터 격리 및 저장 보장.
+
+## 40.6 백엔드 DB 원자성 및 트랜잭션 보장 명세 (Strict Transaction Policy)
+
+1. **원칙 및 요구사항 (ACID 원자성 준수)**:
+   - 두 개 이상의 DML(CUD) 구문을 실행하는 모든 백엔드 처리 로직(회원가입, 전체 동기화 등)은 **반드시 DB 트랜잭션(`BEGIN` ~ `COMMIT` / `ROLLBACK`)으로 래핑**해야 함.
+   - 후속 작업 중 단 하나라도 실패 시 `ROLLBACK`을 수행하여 불완전한 부분 레코드(Partial Record)가 DB에 잔존하지 않도록 원천 차단함.
+
+2. **적용 및 준수 대상**:
+   - **회원가입 (`createUser`)**: `users` 계정 생성과 `settings` 초기 설정 저장을 명시적 `BEGIN` ~ `COMMIT` / `ROLLBACK` 트랜잭션으로 원자적(Atomic) 처리.
+   - **데이터 일괄 동기화 (`syncFullDatabase`)**: 거래내역, 월별 예산, 월별 자산, 프리셋, 설정 저장을 명시적 트랜잭션으로 동기화.
+   - **향후 모든 데이터베이스 다중 테이블 조작 및 CUD 처리**: 트랜잭션 래핑 필수 준수.
+
+## 40.7 수입관리 화면 가족 구성원별 상세 탭 동적 렌더링 명세
+
+1. **배경 및 원인 분석**:
+   - 수입 관리 화면(`IncomeView.jsx`)에서 가족 구성원 상세 탭 클릭 시 탭 상태값(`viewTab`)은 구성원 ID로 저장되나, 표 렌더링 조건문이 하드코딩 문자열(`giseok`, `seungju`)을 검사하여 상세 수입 데이터 셀(`<td>`)이 무효화되고 빈 행만 표출되는 현상 개선.
+
+2. **세부 기능 사양**:
+   - **탭-상태값 동적 매핑**: 가족 구성원 목록(`familyMembers`)의 각 구성원에 대해 `viewTab`을 구성원 ID(`m.id`)로 설정.
+   - **표 렌더링 조건식 동적화**: `<thead>` 및 `<tbody>` 내 조건문을 하드코딩 대신 `familyMembers`에서 선택된 구성원에 매핑하여, 해당 소유자(`cat.owner === selectedMember.name`) 수입 카테고리 컬럼 및 금액 합계가 연간 집계표에 동적으로 정밀 표출되도록 구성.

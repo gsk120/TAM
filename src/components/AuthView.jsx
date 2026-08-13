@@ -18,7 +18,7 @@ export default function AuthView({ onLogin, onRegister }) {
     password: '',
     passwordConfirm: '',
     householdName: '',
-    initialMembers: '기석, 승주, 가족공동',
+    initialMembers: '남편, 아내, 가족공동',
   });
 
   const handleLoginSubmit = async (e) => {
@@ -68,7 +68,7 @@ export default function AuthView({ onLogin, onRegister }) {
         username: signUpForm.username.trim(),
         password: signUpForm.password,
         household_name: signUpForm.householdName.trim() || `${signUpForm.username}의 가계부`,
-        initial_members: members.length > 0 ? members : ['기석', '승주', '가족공동'],
+        initial_members: members.length > 0 ? members : ['남편', '아내', '가족공동'],
       });
     } catch (err) {
       setErrorMsg(err.message || '회원가입 중 오류가 발생했습니다.');
@@ -219,7 +219,7 @@ export default function AuthView({ onLogin, onRegister }) {
                 <User size={18} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
                 <input
                   type="text"
-                  placeholder="아이디를 입력하세요 (예: togom)"
+                  placeholder="아이디를 입력하세요"
                   value={loginForm.username}
                   onChange={e => setLoginForm({ ...loginForm, username: e.target.value })}
                   style={{
@@ -362,7 +362,7 @@ export default function AuthView({ onLogin, onRegister }) {
                 <Home size={18} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
                 <input
                   type="text"
-                  placeholder="예: 기석 & 승주 가족 가계부"
+                  placeholder="예: 우리 집 가계부"
                   value={signUpForm.householdName}
                   onChange={e => setSignUpForm({ ...signUpForm, householdName: e.target.value })}
                   style={{
@@ -387,7 +387,7 @@ export default function AuthView({ onLogin, onRegister }) {
                 <Users size={18} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
                 <input
                   type="text"
-                  placeholder="예: 기석, 승주, 가족공동"
+                  placeholder="예: 남편, 아내, 가족공동"
                   value={signUpForm.initialMembers}
                   onChange={e => setSignUpForm({ ...signUpForm, initialMembers: e.target.value })}
                   style={{

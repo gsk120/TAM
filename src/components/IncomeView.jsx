@@ -12,8 +12,17 @@ export default function IncomeView() {
   const [ownerInput, setOwnerInput] = useState('가족공동');
   const [modalMsg, setModalMsg] = useState('');
 
-  // 뷰 스위처: 'compact' (5컬럼 요약), 'giseok' (기석 상세), 'seungju' (승주 상세), 'all' (전체 펼침)
   const [viewTab, setViewTab] = useState('compact');
+
+  const currentMembers = familyMembers && familyMembers.length > 0
+    ? familyMembers
+    : [
+        { id: 'm1', name: '남편' },
+        { id: 'm2', name: '아내' },
+        { id: 'm3', name: '가족공동' },
+      ];
+
+  const selectedMember = currentMembers.find(m => m.id === viewTab);
   // 드릴다운 팝오버 상태: { month, owner, data }
   const [popover, setPopover] = useState(null);
 
@@ -159,7 +168,7 @@ export default function IncomeView() {
               📊 전체 요약
             </button>
 
-            {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }]).slice(0, 2).map(m => (
+            {currentMembers.map(m => (
               <button
                 key={m.id}
                 className={`btn btn-sm ${viewTab === m.id ? 'btn-primary' : 'btn-secondary'}`}
@@ -181,7 +190,7 @@ export default function IncomeView() {
 
         {/* 안내 얼럿 */}
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Info size={14} /> 기본 5컬럼 뷰에서는 각 월의 수입 셀을 클릭하시면 세부 카테고리 내역이 팝오버로 표출됩니다.
+          <Info size={14} /> 기본 요약 뷰에서는 각 월의 수입 셀을 클릭하시면 세부 카테고리 내역이 팝오버로 표출됩니다.
         </div>
 
         {/* 표 영역 */}
@@ -191,27 +200,18 @@ export default function IncomeView() {
               {viewTab === 'compact' && (
                 <tr>
                   <th>월</th>
-                  <th>기석 수입 합계 💡</th>
-                  <th>승주 수입 합계 💡</th>
-                  <th>기타 / 공동 수입 💡</th>
+                  {currentMembers.map(mem => (
+                    <th key={mem.id}>{mem.name} 수입 합계 💡</th>
+                  ))}
                   <th>총 수입</th>
                 </tr>
               )}
 
-              {viewTab === 'giseok' && (
+              {selectedMember && (
                 <tr>
                   <th>월</th>
-                  {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '기석').map(c => <th key={c.id}>{c.name}</th>)}
-                  <th>기석 수입 합계</th>
-                  <th>총 수입</th>
-                </tr>
-              )}
-
-              {viewTab === 'seungju' && (
-                <tr>
-                  <th>월</th>
-                  {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '승주').map(c => <th key={c.id}>{c.name}</th>)}
-                  <th>승주 수입 합계</th>
+                  {activeIncomeCategories.filter(c => (c.owner || '가족공동') === selectedMember.name).map(c => <th key={c.id}>{c.name}</th>)}
+                  <th>{selectedMember.name} 수입 합계</th>
                   <th>총 수입</th>
                 </tr>
               )}
@@ -229,10 +229,6 @@ export default function IncomeView() {
                 const isSelected = m.yearMonth === selectedMonth;
                 const iMap = m.incomeMap || {};
 
-                const gkTotal = getOwnerIncomeTotal(iMap, '기석');
-                const sjTotal = getOwnerIncomeTotal(iMap, '승주');
-                const etcTotal = getOwnerIncomeTotal(iMap, '가족공동');
-
                 return (
                   <tr key={m.yearMonth} style={{ background: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'transparent', fontWeight: isSelected ? '600' : 'normal' }}>
                     <td>{m.month} {isSelected && '👈'}</td>
@@ -240,46 +236,29 @@ export default function IncomeView() {
                     {/* Compact View */}
                     {viewTab === 'compact' && (
                       <>
-                        <td
-                          style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
-                          onClick={() => setPopover({ month: m.month, owner: '기석', items: getOwnerCategoryBreakdown(iMap, '기석') })}
-                        >
-                          {formatKRW(gkTotal)}
-                        </td>
-                        <td
-                          style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
-                          onClick={() => setPopover({ month: m.month, owner: '승주', items: getOwnerCategoryBreakdown(iMap, '승주') })}
-                        >
-                          {formatKRW(sjTotal)}
-                        </td>
-                        <td
-                          style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
-                          onClick={() => setPopover({ month: m.month, owner: '가족공동', items: getOwnerCategoryBreakdown(iMap, '가족공동') })}
-                        >
-                          {formatKRW(etcTotal)}
-                        </td>
+                        {currentMembers.map(mem => {
+                          const memTotal = getOwnerIncomeTotal(iMap, mem.name);
+                          return (
+                            <td
+                              key={mem.id}
+                              style={{ cursor: 'pointer', color: '#fff', textDecoration: 'underline' }}
+                              onClick={() => setPopover({ month: m.month, owner: mem.name, items: getOwnerCategoryBreakdown(iMap, mem.name) })}
+                            >
+                              {formatKRW(memTotal)}
+                            </td>
+                          );
+                        })}
                         <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                       </>
                     )}
 
-                    {/* Giseok View */}
-                    {viewTab === 'giseok' && (
+                    {/* Dynamic Selected Member Detail View */}
+                    {selectedMember && (
                       <>
-                        {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '기석').map(c => (
+                        {activeIncomeCategories.filter(c => (c.owner || '가족공동') === selectedMember.name).map(c => (
                           <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
                         ))}
-                        <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(gkTotal)}</td>
-                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
-                      </>
-                    )}
-
-                    {/* Seungju View */}
-                    {viewTab === 'seungju' && (
-                      <>
-                        {activeIncomeCategories.filter(c => (c.owner || '가족공동') === '승주').map(c => (
-                          <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
-                        ))}
-                        <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(sjTotal)}</td>
+                        <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(getOwnerIncomeTotal(iMap, selectedMember.name))}</td>
                         <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                       </>
                     )}
