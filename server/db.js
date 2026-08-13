@@ -73,6 +73,9 @@ export async function getDb() {
       // togom 대표 계정 생성 및 기존 NULL 데이터 마이그레이션
       await migrateDefaultUser(pgPoolInstance);
 
+      // 복합 기본키(Composite PK) 마이그레이션 수행
+      await migrateCompositeKeys(pgPoolInstance);
+
     } catch (err) {
       console.warn('⚠️ Schema check / Migration note:', err.message);
     }
@@ -116,9 +119,53 @@ async function migrateDefaultUser(pool) {
     ];
     await pool.query(
       `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, user_id = EXCLUDED.user_id`,
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
       ['familyMembers', defaultUserId, JSON.stringify(defaultMembers)]
     );
+  }
+}
+
+// 복합 기본키(Composite PK) 마이그레이션
+async function migrateCompositeKeys(pool) {
+  try {
+    await pool.query(`DELETE FROM settings a USING settings b WHERE a.ctid < b.ctid AND a.user_id = b.user_id AND a.key = b.key;`);
+    await pool.query(`ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_pkey;`);
+    await pool.query(`ALTER TABLE settings ADD CONSTRAINT settings_pkey PRIMARY KEY (user_id, key);`);
+  } catch (e) {
+    console.warn('settings_pkey migration note:', e.message);
+  }
+
+  try {
+    await pool.query(`DELETE FROM transactions a USING transactions b WHERE a.ctid < b.ctid AND a.user_id = b.user_id AND a.id = b.id;`);
+    await pool.query(`ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_pkey;`);
+    await pool.query(`ALTER TABLE transactions ADD CONSTRAINT transactions_pkey PRIMARY KEY (user_id, id);`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);`);
+  } catch (e) {
+    console.warn('transactions_pkey migration note:', e.message);
+  }
+
+  try {
+    await pool.query(`DELETE FROM monthly_budgets a USING monthly_budgets b WHERE a.ctid < b.ctid AND a.user_id = b.user_id AND a.year_month = b.year_month;`);
+    await pool.query(`ALTER TABLE monthly_budgets DROP CONSTRAINT IF EXISTS monthly_budgets_pkey;`);
+    await pool.query(`ALTER TABLE monthly_budgets ADD CONSTRAINT monthly_budgets_pkey PRIMARY KEY (user_id, year_month);`);
+  } catch (e) {
+    console.warn('monthly_budgets_pkey migration note:', e.message);
+  }
+
+  try {
+    await pool.query(`DELETE FROM monthly_assets a USING monthly_assets b WHERE a.ctid < b.ctid AND a.user_id = b.user_id AND a.year_month = b.year_month;`);
+    await pool.query(`ALTER TABLE monthly_assets DROP CONSTRAINT IF EXISTS monthly_assets_pkey;`);
+    await pool.query(`ALTER TABLE monthly_assets ADD CONSTRAINT monthly_assets_pkey PRIMARY KEY (user_id, year_month);`);
+  } catch (e) {
+    console.warn('monthly_assets_pkey migration note:', e.message);
+  }
+
+  try {
+    await pool.query(`DELETE FROM custom_budget_presets a USING custom_budget_presets b WHERE a.ctid < b.ctid AND a.user_id = b.user_id AND a.id = b.id;`);
+    await pool.query(`ALTER TABLE custom_budget_presets DROP CONSTRAINT IF EXISTS custom_budget_presets_pkey;`);
+    await pool.query(`ALTER TABLE custom_budget_presets ADD CONSTRAINT custom_budget_presets_pkey PRIMARY KEY (user_id, id);`);
+  } catch (e) {
+    console.warn('custom_budget_presets_pkey migration note:', e.message);
   }
 }
 
@@ -136,30 +183,44 @@ export async function getUserById(id) {
 }
 
 export async function createUser({ username, password, household_name, initial_members }) {
-  const db = await getDb();
+  const pool = await getDb();
+  const client = await pool.connect();
   const userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
   const hashedPw = await bcrypt.hash(password, 10);
   
-  await db.query(
-    `INSERT INTO users (id, username, password_hash, household_name, created_at)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [userId, username, hashedPw, household_name || `${username}의 가계부`, new Date().toISOString()]
-  );
+  try {
+    await client.query('BEGIN');
 
-  // 초기 가족 구성원 세팅
-  const members = Array.isArray(initial_members) && initial_members.length > 0
-    ? initial_members.map((name, idx) => ({ id: `m_${idx}`, name: name.trim(), color: ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6'][idx % 5] }))
-    : [
-        { id: 'm1', name: username, color: '#3b82f6' },
-        { id: 'm2', name: '가족공동', color: '#10b981' },
-      ];
+    await client.query(
+      `INSERT INTO users (id, username, password_hash, household_name, created_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [userId, username, hashedPw, household_name || `${username}의 가계부`, new Date().toISOString()]
+    );
 
-  await db.query(
-    `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)`,
-    ['familyMembers', userId, JSON.stringify(members)]
-  );
+    // 초기 가족 구성원 세팅
+    const members = Array.isArray(initial_members) && initial_members.length > 0
+      ? initial_members.map((name, idx) => ({ id: `m_${idx}`, name: name.trim(), color: ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6'][idx % 5] }))
+      : [
+          { id: 'm1', name: '남편', color: '#3b82f6' },
+          { id: 'm2', name: '아내', color: '#ec4899' },
+          { id: 'm3', name: '가족공동', color: '#10b981' },
+        ];
 
-  return { id: userId, username, household_name: household_name || `${username}의 가계부` };
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['familyMembers', userId, JSON.stringify(members)]
+    );
+
+    await client.query('COMMIT');
+    return { id: userId, username, household_name: household_name || `${username}의 가계부` };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error during createUser transaction:', err);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // 특정 user_id의 전체 DB 조회
@@ -345,7 +406,7 @@ async function performSync(userId, fullDb) {
     const saveSetting = async (key, val) => {
       await client.query(
         `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, user_id = EXCLUDED.user_id`,
+         ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
         [key, userId, JSON.stringify(val)]
       );
     };
