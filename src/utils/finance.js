@@ -14,15 +14,15 @@ export const DEFAULT_CATEGORIES = [
   { id: 'cat_etc_life', name: '기타생활비', defaultBudget: 300000, isFixed: false, type: '지출' },
   { id: 'cat_event', name: '이벤트', defaultBudget: 100000, isFixed: false, type: '지출' },
   { id: 'cat_tax', name: '세금', defaultBudget: 0, isFixed: false, type: '지출' },
-  { id: 'cat_allow_gk', name: '기석용돈', defaultBudget: 200000, isFixed: false, type: '지출' },
-  { id: 'cat_allow_sj', name: '승주용돈', defaultBudget: 200000, isFixed: false, type: '지출' },
+  { id: 'cat_allow_1', name: '남편용돈', defaultBudget: 200000, isFixed: false, type: '지출' },
+  { id: 'cat_allow_2', name: '아내용돈', defaultBudget: 200000, isFixed: false, type: '지출' },
 ];
 
 export const INCOME_CATEGORIES = [
-  { id: 'inc_gk_sal', name: '기석월급', owner: '기석' },
-  { id: 'inc_gk_bon', name: '기석상여', owner: '기석' },
-  { id: 'inc_sj_sal', name: '승주월급', owner: '승주' },
-  { id: 'inc_sj_bon', name: '승주상여', owner: '승주' },
+  { id: 'inc_sal_1', name: '남편월급', owner: '남편' },
+  { id: 'inc_bon_1', name: '남편상여', owner: '남편' },
+  { id: 'inc_sal_2', name: '아내월급', owner: '아내' },
+  { id: 'inc_bon_2', name: '아내상여', owner: '아내' },
   { id: 'inc_med_ref', name: '실비', owner: '가족공동' },
   { id: 'inc_etc', name: '기타수입', owner: '가족공동' },
 ];
@@ -30,37 +30,25 @@ export const INCOME_CATEGORIES = [
 export const DEFAULT_INCOME_CATEGORIES = INCOME_CATEGORIES;
 
 export const CASH_ASSET_ITEMS = [
-  { id: 'acc_ibk_gk', name: '기업은행(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_hana_gk', name: '하나은행(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_kbank_gk', name: '케이뱅크(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_ibk_sj', name: '기업은행(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'acc_woori_sj', name: '우리은행(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'acc_busan_sj', name: '부산은행(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'acc_kbank_sj', name: '케이뱅크(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'acc_cma', name: '미래에셋CMA', owner: '가족공동', defaultBalance: 0 },
-  { id: 'acc_bonds', name: '기업은행중금채', owner: '가족공동', defaultBalance: 0 },
-  { id: 'acc_hana_sav', name: '하나은행적금', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_woori_sav', name: '우리은행적금', owner: '승주', defaultBalance: 0 },
-  { id: 'acc_house_gk', name: '주택청약(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'acc_house_sj', name: '주택청약(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'acc_busan_dep', name: '부산은행예금', owner: '승주', defaultBalance: 0 },
+  { id: 'acc_main_1', name: '급여통장(남편)', owner: '남편', defaultBalance: 0 },
+  { id: 'acc_main_2', name: '급여통장(아내)', owner: '아내', defaultBalance: 0 },
+  { id: 'acc_emg', name: '비상금통장(CMA)', owner: '가족공동', defaultBalance: 0 },
+  { id: 'acc_saving_1', name: '적금통장', owner: '남편', defaultBalance: 0 },
+  { id: 'acc_saving_2', name: '정기예금', owner: '아내', defaultBalance: 0 },
+  { id: 'acc_house_1', name: '주택청약', owner: '남편', defaultBalance: 0 },
 ];
 
 export const INVEST_ASSET_ITEMS = [
-  { id: 'inv_toss_gk', name: '토스증권(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'inv_mirae_gk', name: '미래에셋(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'inv_upbit_gk', name: '업비트(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'inv_nh_sj', name: '농협투자(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'inv_toss_sj', name: '토스증권(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'inv_pension_gk', name: '퇴직연금(기석)', owner: '기석', defaultBalance: 0 },
-  { id: 'inv_pension_sj', name: '퇴직연금(승주)', owner: '승주', defaultBalance: 0 },
-  { id: 'inv_realestate', name: '길음뉴타운 6단지', owner: '가족공동', defaultBalance: 0, isRealEstate: true },
-  { id: 'inv_user_1785734857131', name: '종암 SK', owner: '가족공동', defaultBalance: 0, isRealEstate: true },
+  { id: 'inv_stock_1', name: '국내주식/ETF', owner: '남편', defaultBalance: 0 },
+  { id: 'inv_stock_2', name: '해외주식', owner: '아내', defaultBalance: 0 },
+  { id: 'inv_pension_1', name: '퇴직연금(IRP)', owner: '남편', defaultBalance: 0 },
+  { id: 'inv_pension_2', name: '연금저축', owner: '아내', defaultBalance: 0 },
+  { id: 'inv_realestate', name: '부동산(주택/아파트)', owner: '가족공동', defaultBalance: 0, isRealEstate: true },
 ];
 
 export const DEBT_ITEMS = [
-  { id: 'debt_mortgage', name: '주담대', owner: '가족공동', defaultBalance: 0 },
-  { id: 'debt_minus', name: '마통', owner: '가족공동', defaultBalance: 0 },
+  { id: 'debt_mortgage', name: '주택담보대출', owner: '가족공동', defaultBalance: 0 },
+  { id: 'debt_minus', name: '신용대출(마이너스통장)', owner: '가족공동', defaultBalance: 0 },
 ];
 
 export const DEFAULT_ASSET_STRUCTURE = {
@@ -69,10 +57,36 @@ export const DEFAULT_ASSET_STRUCTURE = {
   debtItems: DEBT_ITEMS,
 };
 
-export function getInitialAssetSnapshot(assetStructure = DEFAULT_ASSET_STRUCTURE) {
-  const cashList = assetStructure?.cashItems || CASH_ASSET_ITEMS;
-  const investList = assetStructure?.investItems || INVEST_ASSET_ITEMS;
-  const debtList = assetStructure?.debtItems || DEBT_ITEMS;
+export const EMPTY_ASSET_STRUCTURE = {
+  cashItems: [],
+  investItems: [],
+  debtItems: [],
+};
+
+export const STANDARD_TEMPLATE_CATEGORIES = [
+  { id: 'cat_loan', name: '대출', defaultBudget: 1000000, isFixed: true, type: '지출' },
+  { id: 'cat_ins', name: '보험', defaultBudget: 300000, isFixed: true, type: '지출' },
+  { id: 'cat_house', name: '주거비', defaultBudget: 200000, isFixed: true, type: '지출' },
+  { id: 'cat_comm', name: '통신비', defaultBudget: 150000, isFixed: true, type: '지출' },
+  { id: 'cat_fixed_life', name: '생활고정비', defaultBudget: 200000, isFixed: true, type: '지출' },
+  { id: 'cat_trans', name: '교통', defaultBudget: 150000, isFixed: false, type: '지출' },
+  { id: 'cat_food', name: '식비', defaultBudget: 600000, isFixed: false, type: '지출' },
+  { id: 'cat_child', name: '육아', defaultBudget: 300000, isFixed: false, type: '지출' },
+  { id: 'cat_med', name: '의료비', defaultBudget: 100000, isFixed: false, type: '지출' },
+  { id: 'cat_etc_life', name: '기타생활비', defaultBudget: 200000, isFixed: false, type: '지출' },
+];
+
+export const STANDARD_TEMPLATE_INCOME = [
+  { id: 'inc_sal_1', name: '월급', owner: '남편' },
+  { id: 'inc_sal_2', name: '월급', owner: '아내' },
+  { id: 'inc_bonus', name: '상여', owner: '남편' },
+  { id: 'inc_etc', name: '기타수입', owner: '가족공동' },
+];
+
+export function getInitialAssetSnapshot(assetStructure = EMPTY_ASSET_STRUCTURE) {
+  const cashList = assetStructure?.cashItems || [];
+  const investList = assetStructure?.investItems || [];
+  const debtList = assetStructure?.debtItems || [];
 
   const cashMap = {};
   cashList.forEach(item => { cashMap[item.id] = 0; });
@@ -135,9 +149,9 @@ export function getCategoryBudgetStatus(categoryName, spentAmount, budgetAmount)
 }
 
 // 월간 재무 종합 집계 함수 (3가지 관점 회계 처리)
-export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets = {}, categoriesList = DEFAULT_CATEGORIES, incomeCategoriesList = INCOME_CATEGORIES) {
-  const activeCategories = Array.isArray(categoriesList) && categoriesList.length > 0 ? categoriesList : DEFAULT_CATEGORIES;
-  const activeIncomeCategories = Array.isArray(incomeCategoriesList) && incomeCategoriesList.length > 0 ? incomeCategoriesList : INCOME_CATEGORIES;
+export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets = {}, categoriesList = null, incomeCategoriesList = null) {
+  const activeCategories = Array.isArray(categoriesList) ? categoriesList : DEFAULT_CATEGORIES;
+  const activeIncomeCategories = Array.isArray(incomeCategoriesList) ? incomeCategoriesList : INCOME_CATEGORIES;
 
   // 해당 월 거래 필터링 (YYYY-MM)
   const monthTxs = transactions.filter(t => t.date.startsWith(yearMonth));

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { loadDatabase, loadDatabaseAsync, saveDatabase, resetDatabase, DEFAULT_BASIC_PRESET } from '../utils/storage';
-import { calculateMonthlyMetrics, BUDGET_SCENARIOS, DEFAULT_ASSET_STRUCTURE, CASH_ASSET_ITEMS, INVEST_ASSET_ITEMS, DEBT_ITEMS, getInitialAssetSnapshot } from '../utils/finance';
+import { calculateMonthlyMetrics, BUDGET_SCENARIOS, EMPTY_ASSET_STRUCTURE, getInitialAssetSnapshot } from '../utils/finance';
 
 const AppContext = createContext();
 
@@ -28,17 +28,17 @@ export function AppProvider({ children }) {
       return db.familyMembers;
     }
     return [
-      { id: 'm1', name: '기석', color: '#3b82f6' },
-      { id: 'm2', name: '승주', color: '#ec4899' },
+      { id: 'm1', name: '남편', color: '#3b82f6' },
+      { id: 'm2', name: '아내', color: '#ec4899' },
       { id: 'm3', name: '가족공동', color: '#10b981' },
     ];
   }, [db.familyMembers]);
 
-  // 현재 DB 내의 동적 자산 구조 (없으면 기본 시드 사용)
-  const assetStructure = db.assetStructure || DEFAULT_ASSET_STRUCTURE;
-  const cashList = assetStructure.cashItems || CASH_ASSET_ITEMS;
-  const investList = assetStructure.investItems || INVEST_ASSET_ITEMS;
-  const debtList = assetStructure.debtItems || DEBT_ITEMS;
+  // 현재 DB 내의 동적 자산 구조 (없으면 빈 구조 사용)
+  const assetStructure = db.assetStructure || EMPTY_ASSET_STRUCTURE;
+  const cashList = assetStructure.cashItems || [];
+  const investList = assetStructure.investItems || [];
+  const debtList = assetStructure.debtItems || [];
 
   // 컴포넌트 마운트 시 세션 검증 및 DB 로드
   useEffect(() => {
@@ -233,7 +233,7 @@ export function AppProvider({ children }) {
     };
 
     setDb(prev => {
-      const prevStruct = prev.assetStructure || DEFAULT_ASSET_STRUCTURE;
+      const prevStruct = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
       const targetGroupList = prevStruct[group] || [];
       const updatedGroupList = [...targetGroupList, newItem];
 
@@ -273,7 +273,7 @@ export function AppProvider({ children }) {
     if (!name) return { success: false, message: '항목 명칭을 입력해주세요.' };
 
     setDb(prev => {
-      const prevStruct = prev.assetStructure || DEFAULT_ASSET_STRUCTURE;
+      const prevStruct = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
       const targetGroupList = prevStruct[group] || [];
       const updatedGroupList = targetGroupList.map(item =>
         item.id === id
@@ -302,11 +302,8 @@ export function AppProvider({ children }) {
   // 자산 항목 삭제 (전 월 스냅샷 고아 키 자동 청소)
   const deleteAssetItem = (group, id) => {
     setDb(prev => {
-      const prevStruct = prev.assetStructure || DEFAULT_ASSET_STRUCTURE;
+      const prevStruct = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
       const targetGroupList = prevStruct[group] || [];
-      if (targetGroupList.length <= 1) {
-        return prev;
-      }
       const updatedGroupList = targetGroupList.filter(item => item.id !== id);
 
       const snapGroupKey = group === 'cashItems' ? 'cash' : group === 'investItems' ? 'invest' : 'debt';
@@ -388,7 +385,6 @@ export function AppProvider({ children }) {
 
   // 특정 월 기준 상속/이월 카테고리 예산 계산 함수 (Forward Propagation & Past Preservation)
   const getEffectiveCategoryBudgets = useCallback((targetMonth) => {
-    const scenario = BUDGET_SCENARIOS[activeScenario] || BUDGET_SCENARIOS.basic;
     const result = {};
 
     // db.monthlyBudgets 중 targetMonth 이하(<= targetMonth)인 월들을 오름차순 정렬
@@ -396,7 +392,7 @@ export function AppProvider({ children }) {
       .filter(m => m <= targetMonth)
       .sort();
 
-    db.categories.forEach(cat => {
+    (db.categories || []).forEach(cat => {
       // 가장 최근에 수정된 월의 예산 설정값 검색
       let customVal = undefined;
       for (let i = recordedMonths.length - 1; i >= 0; i--) {
@@ -413,12 +409,8 @@ export function AppProvider({ children }) {
         result[cat.name] = customVal;
       } else if (customPreset?.budgets?.[cat.name] !== undefined) {
         result[cat.name] = customPreset.budgets[cat.name];
-      } else if (cat.name === '대출') {
-        result[cat.name] = scenario.loanBudget;
-      } else if (cat.name === '교육비') {
-        result[cat.name] = scenario.eduBudget;
       } else {
-        result[cat.name] = cat.defaultBudget;
+        result[cat.name] = Number(cat.defaultBudget) || 0;
       }
     });
 

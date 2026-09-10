@@ -217,7 +217,7 @@ export default function SettingsView() {
           />
           <input
             type="text"
-            placeholder="새 구성원 이름 (예: 서아, 서빈)"
+            placeholder="새 구성원 이름 (예: 첫째, 둘째 또는 자녀)"
             value={newMemberName}
             onChange={e => setNewMemberName(e.target.value)}
             style={{

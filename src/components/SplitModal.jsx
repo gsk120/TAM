@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { DEFAULT_CATEGORIES, formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
+import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
 import { X, Plus, Trash2 } from 'lucide-react';
 
 export default function SplitModal({ tx, onClose }) {
   const { db, splitTransaction } = useApp();
-  const categoriesList = db.categories || DEFAULT_CATEGORIES;
-  const defaultSubCat = categoriesList[1]?.name || categoriesList[0]?.name || '미분류';
+  const categoriesList = db.categories || [];
+  const defaultSubCat = categoriesList[1]?.name || categoriesList[0]?.name || '기타';
 
   const [splitItems, setSplitItems] = useState([
     { category: tx.category, amount: tx.amount, memo: '주목적 거래' },

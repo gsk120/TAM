@@ -52,7 +52,7 @@ export default function BudgetView() {
   // [시나리오 저장] 버튼 클릭 시 현재 draftBudgets 저장 또는 덮어쓰기
   const handleSaveScenario = () => {
     const activePreset = db.customBudgetPresets?.[activeScenario];
-    const defaultName = activePreset ? activePreset.name : '기본안 (688만원)';
+    const defaultName = activePreset ? activePreset.name : '기본안';
     const inputName = prompt('현재 입력된 예산 현황을 시나리오로 저장합니다.\n기존 시나리오 이름으로 덮어쓰거나, 새로운 시나리오 이름을 입력하세요:', defaultName);
     if (inputName && inputName.trim()) {
       const cleanName = inputName.trim();
@@ -173,7 +173,7 @@ export default function BudgetView() {
                 </option>
               ))}
               {presetsList.length === 0 && (
-                <option value="basic">기본안 (688만원)</option>
+                <option value="basic">기본안</option>
               )}
             </select>
           </div>
