@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW, formatInputNumber, parseInputNumber, DEFAULT_CATEGORIES, INCOME_CATEGORIES } from '../utils/finance';
+import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
 import { Plus, Upload, Search, Filter, Scissors, Trash2, Edit3, X, Check, ShieldCheck, RotateCcw, AlertTriangle } from 'lucide-react';
 import ImportModal from './ImportModal';
 import SplitModal from './SplitModal';
@@ -23,7 +23,7 @@ export default function TransactionsView() {
   const [splittingTx, setSplittingTx] = useState(null);
   const [editingTx, setEditingTx] = useState(null);
 
-  const defaultCatName = db.categories?.[0]?.name || '식비';
+  const defaultCatName = db.categories?.[0]?.name || db.incomeCategories?.[0]?.name || '지출';
 
   // 폼 상태
   const [formTx, setFormTx] = useState({
@@ -117,7 +117,7 @@ export default function TransactionsView() {
     setFormTx({
       date: `${selectedMonth}-01`,
       type: '지출',
-      category: '식비',
+      category: defaultCatName,
       description: '',
       amount: '',
       owner: '가족공동',
@@ -237,8 +237,8 @@ export default function TransactionsView() {
               <th>
                 <select className="select" style={{ fontSize: '0.75rem', padding: '4px' }} value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
                   <option value="ALL">전체 카테고리</option>
-                  {DEFAULT_CATEGORIES.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                  {INCOME_CATEGORIES.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                  {(db.categories || []).map(c => <option key={c.id || c.name} value={c.name}>{c.name}</option>)}
+                  {(db.incomeCategories || []).map(c => <option key={c.id || c.name} value={c.name}>{c.name}</option>)}
                 </select>
               </th>
 
@@ -261,7 +261,7 @@ export default function TransactionsView() {
               <th>
                 <select className="select" style={{ fontSize: '0.75rem', padding: '4px' }} value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
                   <option value="ALL">전체 귀속</option>
-                  {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                  {(familyMembers || [{ id: 'm1', name: '남편' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '가족공동' }]).map(m => (
                     <option key={m.id} value={m.name}>{m.name}</option>
                   ))}
                 </select>
@@ -449,8 +449,8 @@ export default function TransactionsView() {
                 <div>
                   <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>카테고리 (C열)</label>
                   <select className="select" value={formTx.category} onChange={e => setFormTx({ ...formTx, category: e.target.value })}>
-                    {(db.categories || DEFAULT_CATEGORIES).map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                    {INCOME_CATEGORIES.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                    {(db.categories || []).map(c => <option key={c.id || c.name} value={c.name}>{c.name}</option>)}
+                    {(db.incomeCategories || []).map(c => <option key={c.id || c.name} value={c.name}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>
@@ -469,14 +469,14 @@ export default function TransactionsView() {
 
               <div>
                 <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>거래내용 / 가맹점명 (D열)</label>
-                <input type="text" className="input" placeholder="예: 성북우리아이들병원 또는 쿠팡 장보기" value={formTx.description} onChange={e => setFormTx({ ...formTx, description: e.target.value })} required />
+                <input type="text" className="input" placeholder="예: 마트 장보기, 병원 진료 등" value={formTx.description} onChange={e => setFormTx({ ...formTx, description: e.target.value })} required />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>귀속 구성원</label>
                   <select className="select" value={formTx.owner} onChange={e => setFormTx({ ...formTx, owner: e.target.value })}>
-                    {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                    {(familyMembers || [{ id: 'm1', name: '남편' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '가족공동' }]).map(m => (
                       <option key={m.id} value={m.name}>{m.name}</option>
                     ))}
                   </select>

@@ -95,7 +95,7 @@ async function migrateDefaultUser(pool) {
     await pool.query(
       `INSERT INTO users (id, username, password_hash, household_name, created_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [defaultUserId, 'togom', hashedPw, '기석 & 승주 가족 가계부', new Date().toISOString()]
+      [defaultUserId, 'togom', hashedPw, '우리 가족 가계부', new Date().toISOString()]
     );
     console.log('✨ Created default user: togom (ID:', defaultUserId, ')');
   } else {
@@ -113,8 +113,8 @@ async function migrateDefaultUser(pool) {
   const familyCheck = await pool.query('SELECT * FROM settings WHERE key = $1 AND user_id = $2', ['familyMembers', defaultUserId]);
   if (familyCheck.rows.length === 0) {
     const defaultMembers = [
-      { id: 'm1', name: '기석', color: '#3b82f6' },
-      { id: 'm2', name: '승주', color: '#ec4899' },
+      { id: 'm1', name: '남편', color: '#3b82f6' },
+      { id: 'm2', name: '아내', color: '#ec4899' },
       { id: 'm3', name: '가족공동', color: '#10b981' },
     ];
     await pool.query(
@@ -182,22 +182,25 @@ export async function getUserById(id) {
   return res.rows[0] || null;
 }
 
-export async function createUser({ username, password, household_name, initial_members }) {
+export async function createUser({ username, password, household_name, initial_members, categories, income_categories, initial_budgets }) {
   const pool = await getDb();
   const client = await pool.connect();
   const userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
   const hashedPw = await bcrypt.hash(password, 10);
   
+  const now = new Date();
+  const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
   try {
     await client.query('BEGIN');
 
     await client.query(
       `INSERT INTO users (id, username, password_hash, household_name, created_at)
        VALUES ($1, $2, $3, $4, $5)`,
-      [userId, username, hashedPw, household_name || `${username}의 가계부`, new Date().toISOString()]
+      [userId, username, hashedPw, household_name || `${username}의 가계부`, now.toISOString()]
     );
 
-    // 초기 가족 구성원 세팅
+    // 1. 초기 가족 구성원 세팅
     const members = Array.isArray(initial_members) && initial_members.length > 0
       ? initial_members.map((name, idx) => ({ id: `m_${idx}`, name: name.trim(), color: ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6'][idx % 5] }))
       : [
@@ -210,6 +213,78 @@ export async function createUser({ username, password, household_name, initial_m
       `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
        ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
       ['familyMembers', userId, JSON.stringify(members)]
+    );
+
+    // 2. 수입 카테고리 세팅
+    const finalIncomeCategories = Array.isArray(income_categories) && income_categories.length > 0
+      ? income_categories
+      : [
+          { id: 'inc_salary', name: '월급', owner: members[0]?.name || '가족공동' },
+          { id: 'inc_bonus', name: '상여', owner: members[0]?.name || '가족공동' },
+          { id: 'inc_etc', name: '기타수입', owner: '가족공동' },
+        ];
+
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['incomeCategories', userId, JSON.stringify(finalIncomeCategories)]
+    );
+
+    // 3. 지출 카테고리 세팅
+    const finalCategories = Array.isArray(categories) && categories.length > 0
+      ? categories
+      : [
+          { id: 'cat_food', name: '식비', defaultBudget: 600000, isFixed: false, type: '지출' },
+          { id: 'cat_house', name: '주거비', defaultBudget: 300000, isFixed: true, type: '지출' },
+          { id: 'cat_comm', name: '통신비', defaultBudget: 100000, isFixed: true, type: '지출' },
+          { id: 'cat_trans', name: '교통', defaultBudget: 150000, isFixed: false, type: '지출' },
+          { id: 'cat_life', name: '생활고정비', defaultBudget: 200000, isFixed: true, type: '지출' },
+          { id: 'cat_etc', name: '기타생활비', defaultBudget: 200000, isFixed: false, type: '지출' },
+        ];
+
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['categories', userId, JSON.stringify(finalCategories)]
+    );
+
+    // 4. 총자산 구조: 완전한 빈 상태(Empty State)로 초기화 (기존 togom 자산 유입 원천 차단)
+    const emptyAssetStructure = { cashItems: [], investItems: [], debtItems: [] };
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['assetStructure', userId, JSON.stringify(emptyAssetStructure)]
+    );
+
+    // 5. 기본 시나리오 키 세팅
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['activeScenario', userId, JSON.stringify('basic')]
+    );
+
+    // 6. 초기 카테고리별 예산 매핑 및 프리셋/월별예산 저장
+    const budgetsMap = (initial_budgets && typeof initial_budgets === 'object')
+      ? initial_budgets
+      : finalCategories.reduce((acc, cat) => {
+          acc[cat.name] = Number(cat.defaultBudget) || 0;
+          return acc;
+        }, {});
+
+    // 첫 기본 시나리오 프리셋 저장
+    await client.query(
+      `INSERT INTO custom_budget_presets (id, user_id, name, created_at, budgets)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id, id) DO UPDATE SET budgets = EXCLUDED.budgets`,
+      ['basic', userId, '기본안', now.toISOString(), JSON.stringify(budgetsMap)]
+    );
+
+    // 당월 월별 예산 레코드 저장
+    await client.query(
+      `INSERT INTO monthly_budgets (year_month, user_id, budget_data, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id, year_month) DO UPDATE SET budget_data = EXCLUDED.budget_data`,
+      [currentYearMonth, userId, JSON.stringify(budgetsMap), now.toISOString()]
     );
 
     await client.query('COMMIT');
@@ -289,8 +364,8 @@ export async function getFullDatabase(userId) {
       username: userInfo.username,
       householdName: userInfo.household_name || '우리집 가족 가계부',
     },
-    categories: settingsMap.categories || null,
-    incomeCategories: settingsMap.incomeCategories || null,
+    categories: settingsMap.categories !== undefined ? settingsMap.categories : null,
+    incomeCategories: settingsMap.incomeCategories !== undefined ? settingsMap.incomeCategories : null,
     accounts: settingsMap.accounts || null,
     transactions: transactionsRows.map(t => ({
       ...t,
@@ -308,10 +383,10 @@ export async function getFullDatabase(userId) {
     monthlyAssetSnapshots,
     customBudgetPresets,
     activeScenario: settingsMap.activeScenario || 'basic',
-    assetStructure: settingsMap.assetStructure || null,
+    assetStructure: settingsMap.assetStructure || { cashItems: [], investItems: [], debtItems: [] },
     familyMembers: settingsMap.familyMembers || [
-      { id: 'm1', name: '기석', color: '#3b82f6' },
-      { id: 'm2', name: '승주', color: '#ec4899' },
+      { id: 'm1', name: '남편', color: '#3b82f6' },
+      { id: 'm2', name: '아내', color: '#ec4899' },
       { id: 'm3', name: '가족공동', color: '#10b981' },
     ],
   };

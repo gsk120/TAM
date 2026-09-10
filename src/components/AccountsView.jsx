@@ -1,6 +1,6 @@
 import React, { useState, useRef, useLayoutEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW, formatInputNumber, parseInputNumber, CASH_ASSET_ITEMS, INVEST_ASSET_ITEMS, DEBT_ITEMS } from '../utils/finance';
+import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
 import { Landmark, TrendingUp, CreditCard, PiggyBank, BarChart3, LineChart, Trash2, AlertTriangle, Plus, Edit3, X } from 'lucide-react';
 
 function useContainerWidth() {
@@ -43,9 +43,9 @@ export default function AccountsView() {
     familyMembers,
   } = useApp();
 
-  const cashItems = assetStructure?.cashItems || CASH_ASSET_ITEMS;
-  const investItems = assetStructure?.investItems || INVEST_ASSET_ITEMS;
-  const debtItems = assetStructure?.debtItems || DEBT_ITEMS;
+  const cashItems = assetStructure?.cashItems || [];
+  const investItems = assetStructure?.investItems || [];
+  const debtItems = assetStructure?.debtItems || [];
 
   const [showClearModal, setShowClearModal] = useState(false);
   const [hoverTooltip, setHoverTooltip] = useState(null);
@@ -211,7 +211,7 @@ export default function AccountsView() {
             {formatKRW(debtTotal)}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            주담대 + 마통 잔액
+            {debtItems.length > 0 ? debtItems.map(d => d.name).join(', ') : '등록된 부채 합계'}
           </div>
         </div>
 
@@ -357,6 +357,32 @@ export default function AccountsView() {
         </button>
       </div>
 
+      {/* 등록된 자산이 하나도 없는 신규 계정 전용 Empty State 안내 */}
+      {cashItems.length === 0 && investItems.length === 0 && debtItems.length === 0 && (
+        <div className="glass-card" style={{ padding: '36px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '1px dashed var(--border-color)' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '14px' }}>
+            <Landmark size={28} color="var(--accent-primary)" />
+          </div>
+          <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: '#fff', marginBottom: '6px' }}>
+            등록된 자산 내역이 없습니다
+          </h3>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', maxWidth: '440px', marginBottom: '20px', lineHeight: '1.5' }}>
+            보유하신 은행 계좌, 주식/투자 항목, 대출 부채를 최초 1회 등록하고 매월 말일 잔액 스냅샷을 손쉽게 관리해보세요.
+          </p>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button onClick={() => handleOpenAssetModal('cashItems')} className="btn btn-primary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+              <Plus size={15} /> 현금 계좌 등록
+            </button>
+            <button onClick={() => handleOpenAssetModal('investItems')} className="btn btn-secondary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+              <Plus size={15} /> 투자/자산 등록
+            </button>
+            <button onClick={() => handleOpenAssetModal('debtItems')} className="btn btn-secondary" style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+              <Plus size={15} /> 대출/부채 등록
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 탭별 100% Full-Width 데이터 테이블 뷰 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         {(activeTab === 'cash' || activeTab === 'all') && (
@@ -385,45 +411,58 @@ export default function AccountsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cashItems.map(item => {
-                    const val = snap.cash?.[item.id] ?? 0;
-                    return (
-                      <tr key={item.id}>
-                        <td style={{ fontWeight: '600', color: '#fff' }}>{item.name}</td>
-                        <td><span className="badge badge-stable">{item.owner}</span></td>
-                        <td style={{ textAlign: 'right' }}>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            className="input"
-                            placeholder="0"
-                            style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
-                            value={formatInputNumber(val)}
-                            onFocus={e => e.target.select()}
-                            onChange={e => updateAssetSnapshot(selectedMonth, 'cash', item.id, parseInputNumber(e.target.value))}
-                          />
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                            <button
-                              onClick={() => handleOpenAssetModal('cashItems', item)}
-                              style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', padding: '4px' }}
-                              title="수정"
-                            >
-                              <Edit3 size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteAssetItem('cashItems', item)}
-                              style={{ background: 'transparent', border: 'none', color: '#f43f5e', cursor: 'pointer', padding: '4px' }}
-                              title="삭제"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {cashItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <span>등록된 현금 계좌가 없습니다.</span>
+                          <button onClick={() => handleOpenAssetModal('cashItems')} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+                            <Plus size={14} /> 첫 계좌 등록하기
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    cashItems.map(item => {
+                      const val = snap.cash?.[item.id] ?? 0;
+                      return (
+                        <tr key={item.id}>
+                          <td style={{ fontWeight: '600', color: '#fff' }}>{item.name}</td>
+                          <td><span className="badge badge-stable">{item.owner}</span></td>
+                          <td style={{ textAlign: 'right' }}>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              className="input"
+                              placeholder="0"
+                              style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
+                              value={formatInputNumber(val)}
+                              onFocus={e => e.target.select()}
+                              onChange={e => updateAssetSnapshot(selectedMonth, 'cash', item.id, parseInputNumber(e.target.value))}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                              <button
+                                onClick={() => handleOpenAssetModal('cashItems', item)}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', padding: '4px' }}
+                                title="수정"
+                              >
+                                <Edit3 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAssetItem('cashItems', item)}
+                                style={{ background: 'transparent', border: 'none', color: '#f43f5e', cursor: 'pointer', padding: '4px' }}
+                                title="삭제"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
                 <tfoot>
                   <tr style={{ background: 'rgba(59, 130, 246, 0.15)', fontWeight: '700' }}>
@@ -464,57 +503,61 @@ export default function AccountsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {investItems.map(item => {
-                    let val = snap.invest?.[item.id];
-                    if (val === undefined && snap.invest) {
-                      if (item.id === 'inv_realestate_1' || item.name.includes('길음')) {
-                        val = snap.invest['inv_realestate'] ?? snap.invest['inv_realestate_1'];
-                      } else if (item.id === 'inv_realestate_2' || item.name.includes('종암')) {
-                        const matchingKey = Object.keys(snap.invest).find(k => (k.startsWith('inv_user_') || k === 'inv_realestate_2') && Number(snap.invest[k]) > 0);
-                        if (matchingKey) val = snap.invest[matchingKey];
-                      }
-                    }
-                    val = val ?? 0;
+                  {investItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <span>등록된 투자/자산 항목이 없습니다.</span>
+                          <button onClick={() => handleOpenAssetModal('investItems')} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+                            <Plus size={14} /> 첫 자산 등록하기
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    investItems.map(item => {
+                      const val = snap.invest?.[item.id] ?? snap.invest?.[item.name] ?? 0;
 
-                    return (
-                      <tr key={item.id}>
-                        <td style={{ fontWeight: '600', color: '#fff' }}>
-                          {item.name} {item.isRealEstate && <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', marginLeft: '6px' }}>(부동산)</span>}
-                        </td>
-                        <td><span className="badge badge-stable">{item.owner}</span></td>
-                        <td style={{ textAlign: 'right' }}>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            className="input"
-                            placeholder="0"
-                            style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
-                            value={formatInputNumber(val)}
-                            onFocus={e => e.target.select()}
-                            onChange={e => updateAssetSnapshot(selectedMonth, 'invest', item.id, parseInputNumber(e.target.value))}
-                          />
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                            <button
-                              onClick={() => handleOpenAssetModal('investItems', item)}
-                              style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', padding: '4px' }}
-                              title="수정"
-                            >
-                              <Edit3 size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteAssetItem('investItems', item)}
-                              style={{ background: 'transparent', border: 'none', color: '#f43f5e', cursor: 'pointer', padding: '4px' }}
-                              title="삭제"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                      return (
+                        <tr key={item.id}>
+                          <td style={{ fontWeight: '600', color: '#fff' }}>
+                            {item.name} {item.isRealEstate && <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', marginLeft: '6px' }}>(부동산)</span>}
+                          </td>
+                          <td><span className="badge badge-stable">{item.owner}</span></td>
+                          <td style={{ textAlign: 'right' }}>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              className="input"
+                              placeholder="0"
+                              style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
+                              value={formatInputNumber(val)}
+                              onFocus={e => e.target.select()}
+                              onChange={e => updateAssetSnapshot(selectedMonth, 'invest', item.id, parseInputNumber(e.target.value))}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                              <button
+                                onClick={() => handleOpenAssetModal('investItems', item)}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', padding: '4px' }}
+                                title="수정"
+                              >
+                                <Edit3 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAssetItem('investItems', item)}
+                                style={{ background: 'transparent', border: 'none', color: '#f43f5e', cursor: 'pointer', padding: '4px' }}
+                                title="삭제"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
                 <tfoot>
                   <tr style={{ background: 'rgba(168, 85, 247, 0.12)', fontWeight: '600' }}>
@@ -565,45 +608,58 @@ export default function AccountsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {debtItems.map(item => {
-                    const val = snap.debt?.[item.id] ?? 0;
-                    return (
-                      <tr key={item.id}>
-                        <td style={{ fontWeight: '600', color: '#fff' }}>{item.name}</td>
-                        <td><span className="badge badge-stable">{item.owner}</span></td>
-                        <td style={{ textAlign: 'right' }}>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            className="input"
-                            placeholder="0"
-                            style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
-                            value={formatInputNumber(val)}
-                            onFocus={e => e.target.select()}
-                            onChange={e => updateAssetSnapshot(selectedMonth, 'debt', item.id, parseInputNumber(e.target.value))}
-                          />
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                            <button
-                              onClick={() => handleOpenAssetModal('debtItems', item)}
-                              style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', padding: '4px' }}
-                              title="수정"
-                            >
-                              <Edit3 size={16} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteAssetItem('debtItems', item)}
-                              style={{ background: 'transparent', border: 'none', color: '#f43f5e', cursor: 'pointer', padding: '4px' }}
-                              title="삭제"
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {debtItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <span>등록된 대출/부채 항목이 없습니다.</span>
+                          <button onClick={() => handleOpenAssetModal('debtItems')} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '4px 10px' }}>
+                            <Plus size={14} /> 첫 부채 등록하기
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    debtItems.map(item => {
+                      const val = snap.debt?.[item.id] ?? 0;
+                      return (
+                        <tr key={item.id}>
+                          <td style={{ fontWeight: '600', color: '#fff' }}>{item.name}</td>
+                          <td><span className="badge badge-stable">{item.owner}</span></td>
+                          <td style={{ textAlign: 'right' }}>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              className="input"
+                              placeholder="0"
+                              style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
+                              value={formatInputNumber(val)}
+                              onFocus={e => e.target.select()}
+                              onChange={e => updateAssetSnapshot(selectedMonth, 'debt', item.id, parseInputNumber(e.target.value))}
+                            />
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                              <button
+                                onClick={() => handleOpenAssetModal('debtItems', item)}
+                                style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', padding: '4px' }}
+                                title="수정"
+                              >
+                                <Edit3 size={16} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAssetItem('debtItems', item)}
+                                style={{ background: 'transparent', border: 'none', color: '#f43f5e', cursor: 'pointer', padding: '4px' }}
+                                title="삭제"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
                 <tfoot>
                   <tr style={{ background: 'rgba(244, 63, 94, 0.12)', fontWeight: '600' }}>
@@ -1146,7 +1202,7 @@ export default function AccountsView() {
                   onChange={e => setAssetForm(prev => ({ ...prev, owner: e.target.value }))}
                   style={{ width: '100%' }}
                 >
-                  {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                  {(familyMembers || [{ id: 'm1', name: '남편' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '가족공동' }]).map(m => (
                     <option key={m.id} value={m.name}>{m.name}</option>
                   ))}
                 </select>

@@ -5,7 +5,7 @@ import { LayoutDashboard, ReceiptText, PieChart, Wallet, Landmark, Settings, Cal
 export default function Navbar({ activeTab, setActiveTab }) {
   const { selectedMonth, setSelectedMonth, user, logout, db } = useApp();
 
-  const householdName = user?.householdName || db?.userInfo?.householdName || '기석 & 승주 가족 가계부';
+  const householdName = user?.householdName || db?.userInfo?.householdName || '우리 가족 가계부';
 
   const navItems = [
     { id: 'dashboard', label: '대시보드', icon: LayoutDashboard },
@@ -128,7 +128,7 @@ export default function Navbar({ activeTab, setActiveTab }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(15, 23, 42, 0.6)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: '#fff', fontWeight: '600' }}>
               <User size={15} color="var(--accent-cyan)" />
-              <span>{user?.username || 'togom'}</span>
+              <span>{user?.username || '사용자'}</span>
             </div>
             <button
               onClick={logout}

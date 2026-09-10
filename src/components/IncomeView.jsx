@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW, DEFAULT_INCOME_CATEGORIES } from '../utils/finance';
+import { formatKRW } from '../utils/finance';
 import { Plus, Edit2, Trash2, X, ChevronDown, Info } from 'lucide-react';
 
 export default function IncomeView() {
@@ -26,9 +26,9 @@ export default function IncomeView() {
   // 드릴다운 팝오버 상태: { month, owner, data }
   const [popover, setPopover] = useState(null);
 
-  const activeIncomeCategories = db.incomeCategories && db.incomeCategories.length > 0
+  const activeIncomeCategories = Array.isArray(db.incomeCategories)
     ? db.incomeCategories
-    : DEFAULT_INCOME_CATEGORIES;
+    : [];
 
   const BENCHMARK_INCOME = 10000000;
   const diffFromBenchmark = currentMetrics.totalIncome - BENCHMARK_INCOME;
@@ -109,7 +109,9 @@ export default function IncomeView() {
             💰 수입 관리 & 소유자별 수입 집계
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            기석/승주/공동 소유자별 수입 항목을 동적으로 관리하고 가로 팽창 없는 컴팩트 표로 집계합니다.
+            {(familyMembers && familyMembers.length > 0
+              ? familyMembers.map(m => m.name).join('/')
+              : '가족/공동')} 소유자별 수입 항목을 동적으로 관리하고 가로 팽창 없는 컴팩트 표로 집계합니다.
           </p>
         </div>
         <button
@@ -134,7 +136,7 @@ export default function IncomeView() {
         </div>
 
         {/* 소유자별 동적 카드 */}
-        {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+        {(familyMembers || [{ id: 'm1', name: '남편' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '가족공동' }]).map(m => (
           <div key={m.id} className="glass-card" style={{ padding: '20px' }}>
             <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: m.color || '#3b82f6' }} />
@@ -334,7 +336,7 @@ export default function IncomeView() {
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="예: 기석부업, 배당금, 연말정산환급금"
+                  placeholder="예: 부업, 배당금, 연말정산환급금"
                   value={nameInput}
                   onChange={e => setNameInput(e.target.value)}
                   required
@@ -348,7 +350,7 @@ export default function IncomeView() {
                   value={ownerInput}
                   onChange={e => setOwnerInput(e.target.value)}
                 >
-                  {(familyMembers || [{ id: 'm1', name: '기석' }, { id: 'm2', name: '승주' }, { id: 'm3', name: '가족공동' }]).map(m => (
+                  {(familyMembers || [{ id: 'm1', name: '남편' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '가족공동' }]).map(m => (
                     <option key={m.id} value={m.name}>{m.name} 수입</option>
                   ))}
                 </select>

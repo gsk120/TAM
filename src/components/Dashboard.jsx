@@ -27,6 +27,16 @@ export default function Dashboard() {
     .filter(c => !isFixedCat(c))
     .reduce((acc, c) => acc + c.budget, 0);
 
+  const fixedCostCatNames = currentMetrics.categoryDetails
+    .filter(isFixedCat)
+    .map(c => c.name)
+    .join(', ');
+
+  const realConsumptionCatNames = currentMetrics.categoryDetails
+    .filter(c => !isFixedCat(c))
+    .map(c => c.name)
+    .join(', ');
+
   // 7번 실소비 일일 현황 계산
   const [yearStr, monthStr] = selectedMonth.split('-');
   const year = parseInt(yearStr);
@@ -61,128 +71,158 @@ export default function Dashboard() {
       <div className="kpi-grid-container">
         {/* 1번 카드: 당월 총수입 */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>당월 총수입</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <TrendingUp size={20} color="var(--accent-emerald)" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>당월 총수입</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <TrendingUp size={20} color="var(--accent-emerald)" />
+              </div>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
+              {formatKRW(currentMetrics.totalIncome)}
             </div>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
-            {formatKRW(currentMetrics.totalIncome)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
             월급, 상여, 실비환급, 기타수입 포함
           </div>
         </div>
 
         {/* 2번 카드: 목표 지출 (월예산) */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>목표 지출 (월예산)</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <DollarSign size={20} color="var(--accent-primary)" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>목표 지출 (월예산)</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <DollarSign size={20} color="var(--accent-primary)" />
+              </div>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-cyan)' }}>
+              {formatKRW(totalBudget)}
             </div>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-cyan)' }}>
-            {formatKRW(totalBudget)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            16개 카테고리 설정 예산 합계
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
+            {currentMetrics.categoryDetails.length}개 카테고리 설정 예산 합계
           </div>
         </div>
 
         {/* 3번 카드: 당월 총지출 */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>당월 총지출</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(244, 63, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <HeartPulse size={20} color="var(--accent-rose)" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>당월 총지출</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(244, 63, 94, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <HeartPulse size={20} color="var(--accent-rose)" />
+              </div>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-rose)' }}>
+              {formatKRW(totalSpent)}
             </div>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-rose)' }}>
-            {formatKRW(totalSpent)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
             카테고리별 사용합계 (순의료비 반영)
           </div>
         </div>
 
         {/* 4번 카드: 잔여 예산 [수정 - 총 사용률 % 강조] */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>잔여 예산</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(6, 182, 212, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <PiggyBank size={20} color="var(--accent-cyan)" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>잔여 예산</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(6, 182, 212, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <PiggyBank size={20} color="var(--accent-cyan)" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: '700', color: remainingBudget < 0 ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
+                {formatKRW(remainingBudget)}
+              </span>
+              <span style={{
+                fontSize: '0.8rem',
+                fontWeight: '800',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: overallUsageRate > 100 ? 'rgba(244, 63, 94, 0.2)' : (overallUsageRate > 80 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'),
+                color: overallUsageRate > 100 ? '#f43f5e' : (overallUsageRate > 80 ? '#f59e0b' : '#10b981'),
+                border: `1px solid ${overallUsageRate > 100 ? 'rgba(244, 63, 94, 0.4)' : (overallUsageRate > 80 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.4)')}`
+              }}>
+                사용률 {overallUsageRate.toFixed(1)}%
+              </span>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '1.5rem', fontWeight: '700', color: remainingBudget < 0 ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
-              {formatKRW(remainingBudget)}
-            </span>
-            <span style={{
-              fontSize: '0.8rem',
-              fontWeight: '800',
-              padding: '2px 8px',
-              borderRadius: '6px',
-              background: overallUsageRate > 100 ? 'rgba(244, 63, 94, 0.2)' : (overallUsageRate > 80 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'),
-              color: overallUsageRate > 100 ? '#f43f5e' : (overallUsageRate > 80 ? '#f59e0b' : '#10b981'),
-              border: `1px solid ${overallUsageRate > 100 ? 'rgba(244, 63, 94, 0.4)' : (overallUsageRate > 80 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.4)')}`
-            }}>
-              사용률 {overallUsageRate.toFixed(1)}%
-            </span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
             사용액: {formatKRW(totalSpent)} (총예산 대비)
           </div>
         </div>
 
         {/* 5번 카드: 고정비 합계 [개편] */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>고정비 합계</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <CreditCard size={20} color="#3b82f6" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>고정비 합계</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <CreditCard size={20} color="#3b82f6" />
+              </div>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#60a5fa' }}>
+              {formatKRW(fixedCostsTotal)}
             </div>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#60a5fa' }}>
-            {formatKRW(fixedCostsTotal)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            대출, 보험, 통신, 주거, 고정비, 교통, 세금
+          <div style={{
+            fontSize: '0.75rem',
+            color: 'var(--text-dim)',
+            marginTop: 'auto',
+            paddingTop: '6px',
+            wordBreak: 'keep-all',
+            overflowWrap: 'break-word',
+            lineHeight: '1.4'
+          }} title={fixedCostCatNames}>
+            {fixedCostCatNames || '설정된 고정비 항목 없음'}
           </div>
         </div>
 
         {/* 6번 카드: 실소비 합계 [위치 변경/개편] */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>실소비 합계</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <ShoppingBag size={20} color="#38bdf8" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>실소비 합계</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <ShoppingBag size={20} color="#38bdf8" />
+              </div>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#38bdf8' }}>
+              {formatKRW(realConsumptionTotal)}
             </div>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '700', color: '#38bdf8' }}>
-            {formatKRW(realConsumptionTotal)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
-            식비, 육아, 순의료비, 교육, 기타, 이벤트, 용돈2
+          <div style={{
+            fontSize: '0.75rem',
+            color: 'var(--text-dim)',
+            marginTop: 'auto',
+            paddingTop: '6px',
+            wordBreak: 'keep-all',
+            overflowWrap: 'break-word',
+            lineHeight: '1.4'
+          }} title={realConsumptionCatNames}>
+            {realConsumptionCatNames || '설정된 실소비 항목 없음'}
           </div>
         </div>
 
         {/* 7번 카드: 실소비 일일 현황 [신규 추가] */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>실소비 일일 현황</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(192, 132, 252, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Calendar size={20} color="#c084fc" />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>실소비 일일 현황</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(192, 132, 252, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Calendar size={20} color="#c084fc" />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: '700', color: '#c084fc' }}>
+                {formatKRW(dailyAverageSpent)}
+              </span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>/일 (경과 {elapsedDays}일)</span>
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-            <span style={{ fontSize: '1.5rem', fontWeight: '700', color: '#c084fc' }}>
-              {formatKRW(dailyAverageSpent)}
-            </span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>/일 (경과 {elapsedDays}일)</span>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
             {remainingDays > 0
               ? `일 권장: ${formatKRW(dailyRecommendedSpent)} (남은 D-${remainingDays}일)`
               : `당월 완료 (${totalDaysInMonth}일 경과)`}
@@ -191,16 +231,18 @@ export default function Dashboard() {
 
         {/* 8번 카드: 월 잉여자금 [유지] */}
         <div className="glass-card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>월 잉여자금</span>
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Landmark size={20} color={currentMetrics.monthlySurplus >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)'} />
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>월 잉여자금</span>
+              <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Landmark size={20} color={currentMetrics.monthlySurplus >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)'} />
+              </div>
+            </div>
+            <div style={{ fontSize: '1.6rem', fontWeight: '700', color: currentMetrics.monthlySurplus >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+              {formatKRW(currentMetrics.monthlySurplus)}
             </div>
           </div>
-          <div style={{ fontSize: '1.6rem', fontWeight: '700', color: currentMetrics.monthlySurplus >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
-            {formatKRW(currentMetrics.monthlySurplus)}
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
             총수입 - 통장 실 현금유출 (마통 상환 여력)
           </div>
         </div>

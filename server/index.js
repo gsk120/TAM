@@ -45,7 +45,7 @@ app.get('/api/health', (req, res) => {
 // 1. 회원가입 API
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, password, household_name, initial_members } = req.body;
+    const { username, password, household_name, initial_members, categories, income_categories, initial_budgets } = req.body;
     if (!username || !password) {
       return res.status(400).json({ error: '아이디와 비밀번호를 입력하세요.' });
     }
@@ -55,7 +55,15 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: '이미 사용 중인 아이디입니다.' });
     }
 
-    const newUser = await createUser({ username, password, household_name, initial_members });
+    const newUser = await createUser({
+      username,
+      password,
+      household_name,
+      initial_members,
+      categories,
+      income_categories,
+      initial_budgets,
+    });
     const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '30d' });
 
     res.json({

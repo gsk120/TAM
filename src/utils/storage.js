@@ -23,25 +23,21 @@ export const DEFAULT_BASIC_PRESET = {
     '기타생활비': 300000,
     '이벤트': 100000,
     '세금': 0,
-    '기석용돈': 200000,
-    '승주용돈': 200000,
+    '남편용돈': 200000,
+    '아내용돈': 200000,
   },
 };
 
 export function getInitialDbStructure() {
   return {
-    categories: DEFAULT_CATEGORIES,
-    incomeCategories: DEFAULT_INCOME_CATEGORIES,
-    accounts: DEFAULT_ACCOUNTS,
-    assetStructure: DEFAULT_ASSET_STRUCTURE,
+    categories: [],
+    incomeCategories: [],
+    accounts: [],
+    assetStructure: { cashItems: [], investItems: [], debtItems: [] },
     transactions: [],
     monthlyBudgets: {},
-    monthlyAssetSnapshots: {
-      '2026-07': getInitialAssetSnapshot(DEFAULT_ASSET_STRUCTURE),
-    },
-    customBudgetPresets: {
-      basic: DEFAULT_BASIC_PRESET,
-    },
+    monthlyAssetSnapshots: {},
+    customBudgetPresets: {},
     activeScenario: 'basic',
   };
 }
@@ -95,44 +91,12 @@ function normalizeDbData(db) {
     });
   }
 
-  // 5. 자산 구조(assetStructure) 기본값 및 복원 보장
-  let baseStruct = db.assetStructure || DEFAULT_ASSET_STRUCTURE;
-  if (!baseStruct || !baseStruct.cashItems || baseStruct.cashItems.length === 0) {
-    baseStruct = DEFAULT_ASSET_STRUCTURE;
-  }
-
-  let investItems = Array.isArray(baseStruct.investItems) ? [...baseStruct.investItems] : [...INVEST_ASSET_ITEMS];
-  investItems = investItems.map(item => {
-    if (item.id === 'inv_realestate' && (item.name === '부동산' || !item.name)) {
-      return { ...item, name: '길음뉴타운 6단지', isRealEstate: true };
-    }
-    return item;
-  });
-
-  const knownIds = new Set(investItems.map(i => i.id));
-  if (db.monthlyAssetSnapshots && typeof db.monthlyAssetSnapshots === 'object') {
-    Object.values(db.monthlyAssetSnapshots).forEach(snap => {
-      if (snap && snap.invest && typeof snap.invest === 'object') {
-        Object.keys(snap.invest).forEach(k => {
-          if (!knownIds.has(k) && k.startsWith('inv_user_')) {
-            knownIds.add(k);
-            investItems.push({
-              id: k,
-              name: '종암 SK',
-              owner: '가족공동',
-              defaultBalance: 0,
-              isRealEstate: true,
-            });
-          }
-        });
-      }
-    });
-  }
-
+  // 5. 자산 구조(assetStructure) 안전 보장
+  const baseStruct = db.assetStructure || { cashItems: [], investItems: [], debtItems: [] };
   db.assetStructure = {
-    cashItems: baseStruct.cashItems || CASH_ASSET_ITEMS,
-    investItems: investItems,
-    debtItems: baseStruct.debtItems || DEBT_ITEMS,
+    cashItems: Array.isArray(baseStruct.cashItems) ? baseStruct.cashItems : [],
+    investItems: Array.isArray(baseStruct.investItems) ? baseStruct.investItems : [],
+    debtItems: Array.isArray(baseStruct.debtItems) ? baseStruct.debtItems : [],
   };
 
   return db;
@@ -163,17 +127,21 @@ export async function loadDatabaseAsync(token) {
     const mergedDb = normalizeDbData({
       userInfo: serverDb.userInfo || null,
       familyMembers: serverDb.familyMembers || null,
-      categories: (Array.isArray(serverDb.categories) && serverDb.categories.length > 0) ? serverDb.categories : DEFAULT_CATEGORIES,
-      incomeCategories: (Array.isArray(serverDb.incomeCategories) && serverDb.incomeCategories.length > 0) ? serverDb.incomeCategories : DEFAULT_INCOME_CATEGORIES,
-      accounts: serverDb.accounts || DEFAULT_ACCOUNTS,
+      categories: Array.isArray(serverDb.categories)
+        ? serverDb.categories
+        : (serverDb.userInfo?.username === 'togom' ? DEFAULT_CATEGORIES : []),
+      incomeCategories: Array.isArray(serverDb.incomeCategories)
+        ? serverDb.incomeCategories
+        : (serverDb.userInfo?.username === 'togom' ? DEFAULT_INCOME_CATEGORIES : []),
+      accounts: serverDb.accounts || [],
       transactions: serverDb.transactions || [],
       monthlyBudgets: serverDb.monthlyBudgets || {},
-      monthlyAssetSnapshots: serverDb.monthlyAssetSnapshots || { '2026-07': getInitialAssetSnapshot(DEFAULT_ASSET_STRUCTURE) },
+      monthlyAssetSnapshots: serverDb.monthlyAssetSnapshots || {},
       customBudgetPresets: (serverDb.customBudgetPresets && Object.keys(serverDb.customBudgetPresets).length > 0)
         ? serverDb.customBudgetPresets
-        : { basic: DEFAULT_BASIC_PRESET },
+        : (serverDb.userInfo?.username === 'togom' ? { basic: DEFAULT_BASIC_PRESET } : {}),
       activeScenario: serverDb.activeScenario || 'basic',
-      assetStructure: serverDb.assetStructure || null,
+      assetStructure: serverDb.assetStructure || { cashItems: [], investItems: [], debtItems: [] },
     });
 
     return mergedDb;

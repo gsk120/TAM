@@ -7,7 +7,7 @@ import { X, UploadCloud, AlertCircle, CheckCircle2, ShieldAlert, ShieldCheck } f
 export default function ImportModal({ onClose }) {
   const { db, batchImportTransactions, familyMembers } = useApp();
 
-  const [selectedOwner, setSelectedOwner] = useState(() => (familyMembers && familyMembers.length > 0 ? familyMembers[0].name : '기석'));
+  const [selectedOwner, setSelectedOwner] = useState(() => (familyMembers && familyMembers.length > 0 ? familyMembers[0].name : '가족공동'));
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [candidates, setCandidates] = useState(null); // 중복 탐지 완료된 거래 항목
@@ -100,7 +100,7 @@ export default function ImportModal({ onClose }) {
               👤 이 엑셀 파일의 거래 소유자(Owner)를 선택하세요:
             </label>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {(familyMembers || [{ id: 'm1', name: '기석', color: '#3b82f6' }, { id: 'm2', name: '승주', color: '#ec4899' }, { id: 'm3', name: '가족공동', color: '#10b981' }]).map(m => {
+              {(familyMembers || [{ id: 'm1', name: '남편', color: '#3b82f6' }, { id: 'm2', name: '아내', color: '#ec4899' }, { id: 'm3', name: '가족공동', color: '#10b981' }]).map(m => {
                 const isSelected = selectedOwner === m.name;
                 return (
                   <button
