@@ -45,13 +45,21 @@ export function getInitialDbStructure() {
 function normalizeDbData(db) {
   if (!db) return db;
 
-  // 1. 카테고리 '통신' -> '통신비' 마이그레이션
+  // 1. 카테고리 정규화 및 마이그레이션
   if (Array.isArray(db.categories)) {
     db.categories = db.categories.map(c => {
-      if (c.name === '통신' || c.id === 'cat_comm') {
-        return { ...c, id: 'cat_comm', name: '통신비', defaultBudget: c.defaultBudget || 140000 };
+      let costType = c.costType;
+      if (!costType) {
+        if (c.isFixed === true || String(c.isFixed) === 'true' || c.isFixed === 1) {
+          costType = 'fixed';
+        } else {
+          costType = 'variable';
+        }
       }
-      return c;
+      if (c.name === '통신' || c.id === 'cat_comm') {
+        return { ...c, id: 'cat_comm', name: '통신비', defaultBudget: c.defaultBudget || 140000, costType };
+      }
+      return { ...c, costType };
     });
   }
 

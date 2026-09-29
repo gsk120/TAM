@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
+import { formatKRW, formatInputNumber, parseInputNumber, isFixedCat, isOneOffCat, isVariableCat } from '../utils/finance';
 import { Sliders, PlusCircle, Trash2, Edit3, CheckCircle, Plus, X, AlertTriangle } from 'lucide-react';
 
 export default function BudgetView() {
@@ -27,6 +27,7 @@ export default function BudgetView() {
   const [catForm, setCatForm] = useState({
     name: '',
     defaultBudget: 0,
+    costType: 'variable',
     isFixed: false,
   });
 
@@ -74,18 +75,25 @@ export default function BudgetView() {
   // 카테고리 추가/수정 모달 열기
   const handleOpenCategoryModal = (cat = null) => {
     if (cat) {
-      const isFixedBool = Boolean(cat.isFixed === true || String(cat.isFixed) === 'true' || cat.isFixed === 1);
+      let costType = cat.costType;
+      if (!costType) {
+        if (isFixedCat(cat)) costType = 'fixed';
+        else if (isOneOffCat(cat)) costType = 'one-off';
+        else costType = 'variable';
+      }
       setEditingCategory(cat);
       setCatForm({
         name: cat.name,
         defaultBudget: cat.defaultBudget || 0,
-        isFixed: isFixedBool,
+        costType: costType,
+        isFixed: costType === 'fixed',
       });
     } else {
       setEditingCategory(null);
       setCatForm({
         name: '',
         defaultBudget: 0,
+        costType: 'variable',
         isFixed: false,
       });
     }
@@ -280,14 +288,21 @@ export default function BudgetView() {
             {categoriesList.map(cat => {
               const currentApplied = effectiveCategoryBudgets[cat.name] ?? (Number(cat.defaultBudget) || 0);
               const draftVal = draftBudgets[cat.name] ?? currentApplied;
-              const isFixedGroup = Boolean(cat.isFixed === true || String(cat.isFixed) === 'true' || cat.isFixed === 1);
+              const isFixedGroup = isFixedCat(cat);
+              const isOneOffGroup = isOneOffCat(cat);
               return (
                 <tr key={cat.id || cat.name}>
                   <td style={{ fontWeight: '600', color: '#fff' }}>{cat.name}</td>
                   <td>
-                    <span className={`badge ${isFixedGroup ? 'badge-warning' : 'badge-stable'}`}>
-                      {isFixedGroup ? '🔒 고정비' : '🛒 실소비'}
-                    </span>
+                    {isFixedGroup && (
+                      <span className="badge badge-warning">🔒 고정비</span>
+                    )}
+                    {isOneOffGroup && (
+                      <span className="badge" style={{ background: 'rgba(234, 179, 8, 0.2)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.4)' }}>⚡ 1회성</span>
+                    )}
+                    {!isFixedGroup && !isOneOffGroup && (
+                      <span className="badge badge-stable">🛒 실소비</span>
+                    )}
                   </td>
                   <td style={{ color: 'var(--text-muted)' }}>{formatKRW(cat.defaultBudget || 0)}</td>
                   <td style={{ fontWeight: '700', color: 'var(--accent-cyan)' }}>{formatKRW(currentApplied)}</td>
@@ -329,7 +344,7 @@ export default function BudgetView() {
       {/* 카테고리 추가 / 수정 모달 */}
       {isCategoryModalOpen && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '420px' }}>
+          <div className="modal-content" style={{ maxWidth: '440px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ fontSize: '1.2rem', fontWeight: '700', color: '#fff' }}>
                 {editingCategory ? '✏️ 지출 카테고리 수정' : '➕ 신규 지출 카테고리 추가'}
@@ -347,7 +362,7 @@ export default function BudgetView() {
                 <input
                   type="text"
                   className="input"
-                  placeholder="예: 반려동물, 학원비, 쇼핑"
+                  placeholder="예: 가전/가구, 반려동물, 학원비, 쇼핑"
                   value={catForm.name}
                   onChange={e => setCatForm(prev => ({ ...prev, name: e.target.value }))}
                   required
@@ -356,7 +371,7 @@ export default function BudgetView() {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                  기본 예산 금액 (원)
+                  기본 예산 금액 (원) {catForm.costType === 'one-off' && <span style={{ fontSize: '0.75rem', color: '#facc15' }}>(1회성 지출은 0원 가능)</span>}
                 </label>
                 <input
                   type="text"
@@ -370,48 +385,77 @@ export default function BudgetView() {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
-                  지출 구분 선택 * (대시보드 KPI 5번/6번 요약 자동 연동)
+                  지출 구분 선택 * (대시보드 KPI 연동)
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginTop: '6px' }}>
                   <button
                     type="button"
-                    onClick={() => setCatForm(prev => ({ ...prev, isFixed: true }))}
+                    onClick={() => setCatForm(prev => ({ ...prev, costType: 'fixed', isFixed: true }))}
                     style={{
-                      padding: '10px',
+                      padding: '10px 6px',
                       borderRadius: '8px',
-                      border: catForm.isFixed ? '2px solid #f59e0b' : '1px solid var(--border-color)',
-                      background: catForm.isFixed ? 'rgba(245, 158, 11, 0.25)' : 'rgba(30, 41, 59, 0.5)',
-                      color: catForm.isFixed ? '#fbbf24' : 'var(--text-muted)',
-                      fontWeight: catForm.isFixed ? '700' : '500',
+                      border: catForm.costType === 'fixed' ? '2px solid #3b82f6' : '1px solid var(--border-color)',
+                      background: catForm.costType === 'fixed' ? 'rgba(59, 130, 246, 0.25)' : 'rgba(30, 41, 59, 0.5)',
+                      color: catForm.costType === 'fixed' ? '#60a5fa' : 'var(--text-muted)',
+                      fontWeight: catForm.costType === 'fixed' ? '700' : '500',
+                      fontSize: '0.85rem',
                       cursor: 'pointer',
                       display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '6px',
+                      gap: '4px',
                       transition: 'all 0.2s ease',
                     }}
                   >
-                    🔒 고정비 (5번 KPI)
+                    <span>🔒 고정비</span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>5번 KPI</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCatForm(prev => ({ ...prev, isFixed: false }))}
+                    onClick={() => setCatForm(prev => ({ ...prev, costType: 'variable', isFixed: false }))}
                     style={{
-                      padding: '10px',
+                      padding: '10px 6px',
                       borderRadius: '8px',
-                      border: !catForm.isFixed ? '2px solid #10b981' : '1px solid var(--border-color)',
-                      background: !catForm.isFixed ? 'rgba(16, 185, 129, 0.25)' : 'rgba(30, 41, 59, 0.5)',
-                      color: !catForm.isFixed ? '#34d399' : 'var(--text-muted)',
-                      fontWeight: !catForm.isFixed ? '700' : '500',
+                      border: catForm.costType === 'variable' ? '2px solid #10b981' : '1px solid var(--border-color)',
+                      background: catForm.costType === 'variable' ? 'rgba(16, 185, 129, 0.25)' : 'rgba(30, 41, 59, 0.5)',
+                      color: catForm.costType === 'variable' ? '#34d399' : 'var(--text-muted)',
+                      fontWeight: catForm.costType === 'variable' ? '700' : '500',
+                      fontSize: '0.85rem',
                       cursor: 'pointer',
                       display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '6px',
+                      gap: '4px',
                       transition: 'all 0.2s ease',
                     }}
                   >
-                    🛒 실소비 (6번 KPI)
+                    <span>🛒 실소비</span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>6/7번 KPI</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCatForm(prev => ({ ...prev, costType: 'one_off', isFixed: false }))}
+                    style={{
+                      padding: '10px 6px',
+                      borderRadius: '8px',
+                      border: (catForm.costType === 'one_off' || catForm.costType === 'one-off') ? '2px solid #eab308' : '1px solid var(--border-color)',
+                      background: (catForm.costType === 'one_off' || catForm.costType === 'one-off') ? 'rgba(234, 179, 8, 0.25)' : 'rgba(30, 41, 59, 0.5)',
+                      color: (catForm.costType === 'one_off' || catForm.costType === 'one-off') ? '#facc15' : 'var(--text-muted)',
+                      fontWeight: (catForm.costType === 'one_off' || catForm.costType === 'one-off') ? '700' : '500',
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <span>⚡ 1회성</span>
+                    <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>예산외 특별</span>
                   </button>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW } from '../utils/finance';
+import { formatKRW, isFixedCat, isOneOffCat, isVariableCat } from '../utils/finance';
 import { TrendingUp, AlertTriangle, DollarSign, HeartPulse, PiggyBank, CreditCard, ShoppingBag, Calendar, Landmark } from 'lucide-react';
 
 export default function Dashboard() {
@@ -8,23 +8,24 @@ export default function Dashboard() {
 
   const totalBudget = currentMetrics.categoryDetails.reduce((acc, curr) => acc + curr.budget, 0);
   const totalSpent = currentMetrics.categoryDetails.reduce((acc, curr) => acc + curr.spent, 0);
-  const remainingBudget = totalBudget - totalSpent;
-  const overallUsageRate = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
 
-  const isFixedCat = (c) => Boolean(c.isFixed === true || String(c.isFixed) === 'true' || c.isFixed === 1);
-
-  // 5번 고정비 항목 (isFixed가 true인 카테고리)
+  // 5번 고정비 항목 (isFixedCat인 카테고리)
   const fixedCostsTotal = currentMetrics.categoryDetails
     .filter(isFixedCat)
     .reduce((acc, c) => acc + c.spent, 0);
 
-  // 6번 실소비 항목 (isFixed가 false인 카테고리)
+  // 6번 실소비 항목 (isVariableCat인 카테고리 - 1회성 제외)
   const realConsumptionTotal = currentMetrics.categoryDetails
-    .filter(c => !isFixedCat(c))
+    .filter(isVariableCat)
     .reduce((acc, c) => acc + c.spent, 0);
 
+  // 정기 예산 관리 대상 사용액 (고정비 + 실소비, 1회성 제외)
+  const regularSpent = fixedCostsTotal + realConsumptionTotal;
+  const remainingBudget = totalBudget - regularSpent;
+  const overallUsageRate = totalBudget > 0 ? (regularSpent / totalBudget) * 100 : 0;
+
   const realConsumptionBudget = currentMetrics.categoryDetails
-    .filter(c => !isFixedCat(c))
+    .filter(isVariableCat)
     .reduce((acc, c) => acc + c.budget, 0);
 
   const fixedCostCatNames = currentMetrics.categoryDetails
@@ -33,7 +34,7 @@ export default function Dashboard() {
     .join(', ');
 
   const realConsumptionCatNames = currentMetrics.categoryDetails
-    .filter(c => !isFixedCat(c))
+    .filter(isVariableCat)
     .map(c => c.name)
     .join(', ');
 
@@ -150,7 +151,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
-            사용액: {formatKRW(totalSpent)} (총예산 대비)
+            사용액: {formatKRW(regularSpent)} (정기예산 대비)
           </div>
         </div>
 
@@ -287,36 +288,69 @@ export default function Dashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
           {currentMetrics.categoryDetails.map(cat => {
             const isMedical = cat.name === '의료비';
+            const isFixed = isFixedCat(cat);
+            const isOneOff = isOneOffCat(cat);
+            const hasBudget = cat.budget > 0;
+
             return (
-              <div key={cat.id} style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '14px 16px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <span style={{ fontWeight: '600', fontSize: '0.95rem', color: '#fff' }}>{cat.name}</span>
-                  <span className={`badge ${cat.badgeClass}`}>{cat.status} ({cat.usageRate.toFixed(0)}%)</span>
-                </div>
-
-                {/* 금액 레전드 */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                  <span>사용: {formatKRW(cat.spent)} {isMedical && <span style={{ color: 'var(--accent-cyan)', fontSize: '0.7rem' }}>(순의료비)</span>}</span>
-                  <span>예산: {formatKRW(cat.budget)}</span>
-                </div>
-
-                {/* 의료비 전용 총지출 & 실비환급 서브 설명 */}
-                {isMedical && (cat.grossMedicalSpent > 0 || cat.medicalRefund > 0) && (
-                  <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginBottom: '6px' }}>
-                    * 지출 {formatKRW(cat.grossMedicalSpent)} - 실비 {formatKRW(cat.medicalRefund)}
+              <div key={cat.id} style={{ background: 'rgba(15, 23, 42, 0.5)', padding: '14px 16px', borderRadius: '10px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {isFixed && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', fontWeight: '600' }}>고정비</span>
+                      )}
+                      {isOneOff && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(234, 179, 8, 0.15)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.3)', fontWeight: '600' }}>1회성</span>
+                      )}
+                      {!isFixed && !isOneOff && (
+                        <span style={{ fontSize: '0.7rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontWeight: '600' }}>실소비</span>
+                      )}
+                      <span style={{ fontWeight: '600', fontSize: '0.95rem', color: '#fff' }}>{cat.name}</span>
+                    </div>
+                    {hasBudget ? (
+                      <span className={`badge ${cat.badgeClass}`}>{cat.status} ({cat.usageRate.toFixed(0)}%)</span>
+                    ) : (
+                      <span className="badge badge-info" style={{ background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8', border: '1px solid rgba(148, 163, 184, 0.3)' }}>예산외</span>
+                    )}
                   </div>
-                )}
 
-                {/* 프로그래스 바 */}
-                <div className="progress-bg">
-                  <div
-                    className={`progress-fill ${cat.barClass}`}
-                    style={{ width: `${Math.min(100, cat.usageRate)}%` }}
-                  />
+                  {/* 금액 레전드 */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    <span>사용: <strong style={{ color: '#fff' }}>{formatKRW(cat.spent)}</strong> {isMedical && <span style={{ color: 'var(--accent-cyan)', fontSize: '0.7rem' }}>(순의료비)</span>}</span>
+                    <span>{hasBudget ? `예산: ${formatKRW(cat.budget)}` : '예산: 미설정'}</span>
+                  </div>
+
+                  {/* 의료비 전용 총지출 & 실비환급 서브 설명 */}
+                  {isMedical && (cat.grossMedicalSpent > 0 || cat.medicalRefund > 0) && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginBottom: '6px' }}>
+                      * 지출 {formatKRW(cat.grossMedicalSpent)} - 실비 {formatKRW(cat.medicalRefund)}
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ fontSize: '0.75rem', color: cat.remaining < 0 ? 'var(--accent-rose)' : 'var(--text-dim)', marginTop: '6px', textAlign: 'right' }}>
-                  {cat.remaining < 0 ? `초과액: ${formatKRW(Math.abs(cat.remaining))}` : `남은금액: ${formatKRW(cat.remaining)}`}
+                {/* 프로그래스 바 또는 예산 외 지출 라인 */}
+                <div style={{ marginTop: 'auto', paddingTop: '4px' }}>
+                  {hasBudget ? (
+                    <>
+                      <div className="progress-bg">
+                        <div
+                          className={`progress-fill ${cat.barClass}`}
+                          style={{ width: `${Math.min(100, cat.usageRate)}%` }}
+                        />
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: cat.remaining < 0 ? 'var(--accent-rose)' : 'var(--text-dim)', marginTop: '6px', textAlign: 'right' }}>
+                        {cat.remaining < 0 ? `초과액: ${formatKRW(Math.abs(cat.remaining))}` : `남은금액: ${formatKRW(cat.remaining)}`}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ height: '4px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '2px', margin: '6px 0' }} />
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '6px', textAlign: 'right' }}>
+                        {isOneOff ? '비정기 1회성 지출' : '예산 미설정 항목'}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             );

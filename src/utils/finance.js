@@ -1,22 +1,26 @@
 // 카테고리 정의 및 기본 예산 (PRD 8.2 & 엑셀 기준)
 export const DEFAULT_CATEGORIES = [
-  { id: 'cat_loan', name: '대출', defaultBudget: 2900000, isFixed: true, type: '지출' },
-  { id: 'cat_ins', name: '보험', defaultBudget: 550000, isFixed: true, type: '지출' },
-  { id: 'cat_comm', name: '통신비', defaultBudget: 140000, isFixed: true, type: '지출' },
-  { id: 'cat_house', name: '주거비', defaultBudget: 210000, isFixed: true, type: '지출' },
-  { id: 'cat_fixed_life', name: '생활고정비', defaultBudget: 260000, isFixed: true, type: '지출' },
-  { id: 'cat_fixed_fin', name: '금융고정비', defaultBudget: 420000, isFixed: true, type: '지출' },
-  { id: 'cat_trans', name: '교통', defaultBudget: 150000, isFixed: false, type: '지출' },
-  { id: 'cat_food', name: '식비', defaultBudget: 800000, isFixed: false, type: '지출' },
-  { id: 'cat_child', name: '육아', defaultBudget: 500000, isFixed: false, type: '지출' },
-  { id: 'cat_med', name: '의료비', defaultBudget: 150000, isFixed: false, type: '지출' },
-  { id: 'cat_edu', name: '교육비', defaultBudget: 0, isFixed: false, type: '지출' },
-  { id: 'cat_etc_life', name: '기타생활비', defaultBudget: 300000, isFixed: false, type: '지출' },
-  { id: 'cat_event', name: '이벤트', defaultBudget: 100000, isFixed: false, type: '지출' },
-  { id: 'cat_tax', name: '세금', defaultBudget: 0, isFixed: false, type: '지출' },
-  { id: 'cat_allow_1', name: '남편용돈', defaultBudget: 200000, isFixed: false, type: '지출' },
-  { id: 'cat_allow_2', name: '아내용돈', defaultBudget: 200000, isFixed: false, type: '지출' },
+  { id: 'cat_loan', name: '대출', defaultBudget: 2900000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_ins', name: '보험', defaultBudget: 550000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_comm', name: '통신비', defaultBudget: 140000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_house', name: '주거비', defaultBudget: 210000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_fixed_life', name: '생활고정비', defaultBudget: 260000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_fixed_fin', name: '금융고정비', defaultBudget: 420000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_trans', name: '교통', defaultBudget: 150000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_food', name: '식비', defaultBudget: 800000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_child', name: '육아', defaultBudget: 500000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_med', name: '의료비', defaultBudget: 150000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_edu', name: '교육비', defaultBudget: 0, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_etc_life', name: '기타생활비', defaultBudget: 300000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_event', name: '이벤트', defaultBudget: 100000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_tax', name: '세금', defaultBudget: 0, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_allow_1', name: '남편용돈', defaultBudget: 200000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_allow_2', name: '아내용돈', defaultBudget: 200000, isFixed: false, costType: 'variable', type: '지출' },
 ];
+
+export const isFixedCat = (c) => Boolean(c?.costType === 'fixed' || (!c?.costType && (c?.isFixed === true || String(c?.isFixed) === 'true' || c?.isFixed === 1)));
+export const isOneOffCat = (c) => Boolean(c?.costType === 'one_off' || c?.costType === 'one-off' || c?.costType === 'special' || c?.isOneOff === true || String(c?.isOneOff) === 'true');
+export const isVariableCat = (c) => Boolean(c?.costType === 'variable' || (!c?.costType && !isFixedCat(c) && !isOneOffCat(c)));
 
 export const INCOME_CATEGORIES = [
   { id: 'inc_sal_1', name: '남편월급', owner: '남편' },
@@ -64,16 +68,16 @@ export const EMPTY_ASSET_STRUCTURE = {
 };
 
 export const STANDARD_TEMPLATE_CATEGORIES = [
-  { id: 'cat_loan', name: '대출', defaultBudget: 1000000, isFixed: true, type: '지출' },
-  { id: 'cat_ins', name: '보험', defaultBudget: 300000, isFixed: true, type: '지출' },
-  { id: 'cat_house', name: '주거비', defaultBudget: 200000, isFixed: true, type: '지출' },
-  { id: 'cat_comm', name: '통신비', defaultBudget: 150000, isFixed: true, type: '지출' },
-  { id: 'cat_fixed_life', name: '생활고정비', defaultBudget: 200000, isFixed: true, type: '지출' },
-  { id: 'cat_trans', name: '교통', defaultBudget: 150000, isFixed: false, type: '지출' },
-  { id: 'cat_food', name: '식비', defaultBudget: 600000, isFixed: false, type: '지출' },
-  { id: 'cat_child', name: '육아', defaultBudget: 300000, isFixed: false, type: '지출' },
-  { id: 'cat_med', name: '의료비', defaultBudget: 100000, isFixed: false, type: '지출' },
-  { id: 'cat_etc_life', name: '기타생활비', defaultBudget: 200000, isFixed: false, type: '지출' },
+  { id: 'cat_loan', name: '대출', defaultBudget: 1000000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_ins', name: '보험', defaultBudget: 300000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_house', name: '주거비', defaultBudget: 200000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_comm', name: '통신비', defaultBudget: 150000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_fixed_life', name: '생활고정비', defaultBudget: 200000, isFixed: true, costType: 'fixed', type: '지출' },
+  { id: 'cat_trans', name: '교통', defaultBudget: 150000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_food', name: '식비', defaultBudget: 600000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_child', name: '육아', defaultBudget: 300000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_med', name: '의료비', defaultBudget: 100000, isFixed: false, costType: 'variable', type: '지출' },
+  { id: 'cat_etc_life', name: '기타생활비', defaultBudget: 200000, isFixed: false, costType: 'variable', type: '지출' },
 ];
 
 export const STANDARD_TEMPLATE_INCOME = [
@@ -282,6 +286,25 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
   // 실 지출 = 카테고리별 사용합계금 (또는 총지출 - 실비수입)
   const categoryTotalSpent = categoryDetails.reduce((acc, cat) => acc + cat.spent, 0);
 
+  // 5번 고정비 항목 합계 (isFixedCat)
+  const fixedCostsTotal = categoryDetails
+    .filter(isFixedCat)
+    .reduce((acc, c) => acc + c.spent, 0);
+
+  // 6번 실소비 항목 합계 (isVariableCat: 1회성 제외)
+  const realConsumptionTotal = categoryDetails
+    .filter(isVariableCat)
+    .reduce((acc, c) => acc + c.spent, 0);
+
+  const realConsumptionBudget = categoryDetails
+    .filter(isVariableCat)
+    .reduce((acc, c) => acc + c.budget, 0);
+
+  // 1회성 지출 항목 합계 (isOneOffCat)
+  const oneOffCostsTotal = categoryDetails
+    .filter(isOneOffCat)
+    .reduce((acc, c) => acc + c.spent, 0);
+
   // 월 잉여자금 = 총수입 - 총지출
   const monthlySurplus = totalIncome - totalExpense;
 
@@ -296,6 +319,10 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
     categoryTotalSpent,
     totalCashOutflow,
     realConsumption,
+    fixedCostsTotal,
+    realConsumptionTotal,
+    realConsumptionBudget,
+    oneOffCostsTotal,
     assetIncrease,
     debtReduction,
     totalMedicalExpense,
