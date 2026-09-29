@@ -122,7 +122,7 @@ export default function AuthView({ onLogin, onRegister }) {
   const handleAddExpense = () => {
     setExpenseCategories(prev => [
       ...prev,
-      { id: `cat_custom_${Date.now()}`, name: '', defaultBudget: 100000, isFixed: false, type: '지출' },
+      { id: `cat_custom_${Date.now()}`, name: '', defaultBudget: 100000, costType: 'variable', isFixed: false, type: '지출' },
     ]);
   };
 
@@ -160,7 +160,17 @@ export default function AuthView({ onLogin, onRegister }) {
 
     // 지출 카테고리 이름 검증
     const validExpense = expenseCategories
-      .map(c => ({ ...c, name: c.name.trim(), defaultBudget: Number(c.defaultBudget) || 0 }))
+      .map(c => {
+        let costType = c.costType;
+        if (!costType) costType = c.isFixed ? 'fixed' : 'variable';
+        return {
+          ...c,
+          name: c.name.trim(),
+          defaultBudget: Number(c.defaultBudget) || 0,
+          costType: costType,
+          isFixed: costType === 'fixed',
+        };
+      })
       .filter(c => c.name.length > 0);
 
     if (validExpense.length === 0) {
@@ -757,77 +767,104 @@ export default function AuthView({ onLogin, onRegister }) {
                 </div>
 
                 <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px', paddingRight: '4px' }}>
-                  {expenseCategories.map((item, idx) => (
-                    <div key={item.id || idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: 'rgba(15, 23, 42, 0.6)', padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                      <input
-                        type="text"
-                        placeholder="카테고리명 (예: 식비)"
-                        value={item.name}
-                        onChange={e => handleUpdateExpense(idx, 'name', e.target.value)}
-                        style={{
-                          flex: 2,
-                          padding: '6px 8px',
-                          borderRadius: '6px',
-                          background: 'rgba(30, 41, 59, 0.8)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          color: '#fff',
-                          fontSize: '0.85rem',
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleUpdateExpense(idx, 'isFixed', !item.isFixed)}
-                        style={{
-                          padding: '5px 8px',
-                          borderRadius: '6px',
-                          fontSize: '0.74rem',
-                          fontWeight: '600',
-                          border: 'none',
-                          cursor: 'pointer',
-                          background: item.isFixed ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.2)',
-                          color: item.isFixed ? '#60a5fa' : '#34d399',
-                        }}
-                      >
-                        {item.isFixed ? '고정비' : '실소비'}
-                      </button>
-                      <div style={{ flex: 2, position: 'relative' }}>
+                  {expenseCategories.map((item, idx) => {
+                    const effectiveType = item.costType || (item.isFixed ? 'fixed' : 'variable');
+                    const isOneOff = effectiveType === 'one_off' || effectiveType === 'one-off';
+                    const cycleType = () => {
+                      let nextType = 'variable';
+                      let nextIsFixed = false;
+                      if (effectiveType === 'fixed') {
+                        nextType = 'variable';
+                        nextIsFixed = false;
+                      } else if (effectiveType === 'variable') {
+                        nextType = 'one_off';
+                        nextIsFixed = false;
+                      } else {
+                        nextType = 'fixed';
+                        nextIsFixed = true;
+                      }
+                      handleUpdateExpense(idx, 'costType', nextType);
+                      handleUpdateExpense(idx, 'isFixed', nextIsFixed);
+                    };
+
+                    return (
+                      <div key={item.id || idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', background: 'rgba(15, 23, 42, 0.6)', padding: '8px 10px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
                         <input
                           type="text"
-                          inputMode="numeric"
-                          placeholder="예산(원)"
-                          value={formatInputNumber(item.defaultBudget)}
-                          onChange={e => handleUpdateExpense(idx, 'defaultBudget', parseInputNumber(e.target.value))}
+                          placeholder="카테고리명 (예: 식비)"
+                          value={item.name}
+                          onChange={e => handleUpdateExpense(idx, 'name', e.target.value)}
                           style={{
-                            width: '100%',
-                            padding: '6px 20px 6px 8px',
-                            textAlign: 'right',
+                            flex: 2,
+                            padding: '6px 8px',
                             borderRadius: '6px',
                             background: 'rgba(30, 41, 59, 0.8)',
                             border: '1px solid rgba(255,255,255,0.1)',
-                            color: 'var(--accent-cyan)',
-                            fontWeight: '600',
+                            color: '#fff',
                             fontSize: '0.85rem',
                           }}
                         />
-                        <span style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                          원
-                        </span>
+                        <button
+                          type="button"
+                          onClick={cycleType}
+                          style={{
+                            padding: '5px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.74rem',
+                            fontWeight: '600',
+                            border: 'none',
+                            cursor: 'pointer',
+                            background: effectiveType === 'fixed'
+                              ? 'rgba(59, 130, 246, 0.25)'
+                              : (isOneOff ? 'rgba(234, 179, 8, 0.25)' : 'rgba(16, 185, 129, 0.2)'),
+                            color: effectiveType === 'fixed'
+                              ? '#60a5fa'
+                              : (isOneOff ? '#facc15' : '#34d399'),
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="클릭하여 고정비/실소비/1회성 전환"
+                        >
+                          {effectiveType === 'fixed' ? '🔒고정' : (isOneOff ? '⚡1회성' : '🛒실소비')}
+                        </button>
+                        <div style={{ flex: 2, position: 'relative' }}>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="예산(원)"
+                            value={formatInputNumber(item.defaultBudget)}
+                            onChange={e => handleUpdateExpense(idx, 'defaultBudget', parseInputNumber(e.target.value))}
+                            style={{
+                              width: '100%',
+                              padding: '6px 20px 6px 8px',
+                              textAlign: 'right',
+                              borderRadius: '6px',
+                              background: 'rgba(30, 41, 59, 0.8)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              color: 'var(--accent-cyan)',
+                              fontWeight: '600',
+                              fontSize: '0.85rem',
+                            }}
+                          />
+                          <span style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                            원
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExpense(idx)}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#f43f5e',
+                            cursor: 'pointer',
+                            padding: '4px',
+                          }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteExpense(idx)}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#f43f5e',
-                          cursor: 'pointer',
-                          padding: '4px',
-                        }}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* 총 목표 월예산 요약 */}

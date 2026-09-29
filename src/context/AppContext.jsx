@@ -453,19 +453,26 @@ export function AppProvider({ children }) {
   }, [selectedMonth, db.transactions, getEffectiveCategoryBudgets, db.categories, db.incomeCategories]);
 
   // 1. 카테고리 동적 추가
-  const addCategory = ({ name, defaultBudget, isFixed }) => {
+  const addCategory = ({ name, defaultBudget, isFixed, costType }) => {
     const trimmedName = String(name || '').trim();
     if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
 
     const exists = db.categories.some(c => c.name === trimmedName);
     if (exists) return { success: false, message: '이미 존재하는 카테고리 이름입니다.' };
 
-    const isFixedBool = Boolean(isFixed === true || String(isFixed) === 'true' || isFixed === 1);
+    let effectiveCostType = costType;
+    if (!effectiveCostType) {
+      const isFixedBool = Boolean(isFixed === true || String(isFixed) === 'true' || isFixed === 1);
+      effectiveCostType = isFixedBool ? 'fixed' : 'variable';
+    }
+    const isFixedBool = effectiveCostType === 'fixed';
+
     const newId = `cat_user_${Date.now()}`;
     const newCategory = {
       id: newId,
       name: trimmedName,
       defaultBudget: Number(defaultBudget) || 0,
+      costType: effectiveCostType,
       isFixed: isFixedBool,
       type: '지출',
     };
@@ -508,12 +515,17 @@ export function AppProvider({ children }) {
   };
 
   // 2. 카테고리 정보 수정 (이름 변경 시 거래내역/예산 키 일괄 갱신)
-  const updateCategory = (id, { name, defaultBudget, isFixed }) => {
+  const updateCategory = (id, { name, defaultBudget, isFixed, costType }) => {
     try {
       const trimmedName = String(name || '').trim();
       if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
 
-      const isFixedBool = Boolean(isFixed === true || String(isFixed) === 'true' || isFixed === 1);
+      let effectiveCostType = costType;
+      if (!effectiveCostType) {
+        const isFixedBool = Boolean(isFixed === true || String(isFixed) === 'true' || isFixed === 1);
+        effectiveCostType = isFixedBool ? 'fixed' : 'variable';
+      }
+      const isFixedBool = effectiveCostType === 'fixed';
 
       const categoriesArr = db.categories || [];
       const targetIndex = categoriesArr.findIndex(c => (id && c.id === id) || c.name === trimmedName);
@@ -531,7 +543,7 @@ export function AppProvider({ children }) {
         const prevCategories = prev.categories || [];
         const updatedCategories = prevCategories.map(c =>
           (c.id === targetId || c.name === oldName)
-            ? { ...c, id: targetId, name: trimmedName, defaultBudget: Number(defaultBudget) || 0, isFixed: isFixedBool }
+            ? { ...c, id: targetId, name: trimmedName, defaultBudget: Number(defaultBudget) || 0, costType: effectiveCostType, isFixed: isFixedBool }
             : c
         );
 

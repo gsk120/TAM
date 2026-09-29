@@ -76,6 +76,9 @@ export async function getDb() {
       // 복합 기본키(Composite PK) 마이그레이션 수행
       await migrateCompositeKeys(pgPoolInstance);
 
+      // 카테고리 costType 표준 코드값 마이그레이션 수행
+      await migrateCategoryCostTypes(pgPoolInstance);
+
     } catch (err) {
       console.warn('⚠️ Schema check / Migration note:', err.message);
     }
@@ -166,6 +169,60 @@ async function migrateCompositeKeys(pool) {
     await pool.query(`ALTER TABLE custom_budget_presets ADD CONSTRAINT custom_budget_presets_pkey PRIMARY KEY (user_id, id);`);
   } catch (e) {
     console.warn('custom_budget_presets_pkey migration note:', e.message);
+  }
+}
+
+// 카테고리 costType 표준 코드값(fixed, variable, one_off) 자동 마이그레이션
+async function migrateCategoryCostTypes(pool) {
+  try {
+    const res = await pool.query("SELECT user_id, key, value FROM settings WHERE key = 'categories'");
+    for (const row of res.rows) {
+      const userId = row.user_id;
+      let categories = [];
+      try {
+        categories = JSON.parse(row.value);
+      } catch (e) {
+        continue;
+      }
+      if (!Array.isArray(categories)) continue;
+
+      let modified = false;
+      const updatedCategories = categories.map(c => {
+        let costType = c.costType;
+        if (!costType) {
+          if (c.isFixed === true || String(c.isFixed) === 'true' || c.isFixed === 1) {
+            costType = 'fixed';
+          } else {
+            costType = 'variable';
+          }
+          modified = true;
+        } else if (costType === 'one-off') {
+          costType = 'one_off';
+          modified = true;
+        }
+
+        const isFixedBool = (costType === 'fixed');
+        if (c.isFixed !== isFixedBool) {
+          modified = true;
+        }
+
+        return {
+          ...c,
+          costType,
+          isFixed: isFixedBool,
+        };
+      });
+
+      if (modified) {
+        await pool.query(
+          "UPDATE settings SET value = $1 WHERE key = 'categories' AND user_id = $2",
+          [JSON.stringify(updatedCategories), userId]
+        );
+        console.log(`✨ Migrated categories costType for user: ${userId}`);
+      }
+    }
+  } catch (err) {
+    console.warn('⚠️ Category costType migration note:', err.message);
   }
 }
 
