@@ -62,14 +62,20 @@ export default function ImportModal({ onClose }) {
     setCandidates(prev => prev.map(c => ({ ...c, selected: selectVal })));
   };
 
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async () => {
     const selectedTxs = candidates.filter(c => c.selected).map(({ selected, duplicateStatus, duplicateReason, ...tx }) => tx);
     if (selectedTxs.length === 0) {
       alert('가져올 거래 항목을 하나 이상 선택하세요.');
       return;
     }
 
-    batchImportTransactions(selectedTxs);
+    setIsLoading(true);
+    const res = await batchImportTransactions(selectedTxs);
+    setIsLoading(false);
+    if (!res.success) {
+      setErrorMsg(res.message || '거래 내역 저장에 실패했습니다.');
+      return;
+    }
     alert(`${selectedTxs.length}건의 거래 내역을 가계부에 등록했습니다! (월별 자동 분류됨)`);
     onClose();
   };
@@ -232,8 +238,8 @@ export default function ImportModal({ onClose }) {
               <button className="btn btn-secondary" onClick={() => setCandidates(null)}>전체 취소 및 다시 선택</button>
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button className="btn btn-secondary" onClick={onClose}>닫기</button>
-                <button className="btn btn-primary" onClick={handleConfirmImport}>
-                  선택한 {selectedCount}건 가계부에 일괄 저장
+                <button className="btn btn-primary" onClick={handleConfirmImport} disabled={isLoading}>
+                  {isLoading ? '저장 중…' : `선택한 ${selectedCount}건 가계부에 일괄 저장`}
                 </button>
               </div>
             </div>

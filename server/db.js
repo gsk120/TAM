@@ -469,8 +469,9 @@ async function performSync(userId, fullDb) {
     await client.query('BEGIN');
 
     // 1. 거래 데이터 동기화 (해당 userId 레코드만 삭제 후 이관)
-    await client.query('DELETE FROM transactions WHERE user_id = $1', [userId]);
-    if (Array.isArray(fullDb.transactions)) {
+    // Transactions are persisted exclusively through their CRUD endpoints.
+    // Whole-database sync must not delete or restore transaction snapshots.
+    if (process.env.ENABLE_LEGACY_TRANSACTION_FULL_SYNC === 'true' && Array.isArray(fullDb.transactions)) {
       for (const t of fullDb.transactions) {
         await client.query(
           `INSERT INTO transactions (id, user_id, date, amount, category, category_id, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)

@@ -14,6 +14,24 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const JWT_SECRET = process.env.JWT_SECRET || 'household_asset_management_jwt_secret_2026';
 
+function normalizeTransaction(transaction, fallbackId = String(Date.now())) {
+  return {
+    id: transaction.id || fallbackId,
+    date: transaction.date || '', amount: Number(transaction.amount) || 0,
+    category: transaction.category || '', category_id: transaction.category_id || '', subcategory: transaction.subcategory || '',
+    type: transaction.type || '지출', description: transaction.description || '', memo: transaction.memo || '',
+    account: transaction.account || '', payment_method: transaction.payment_method || '', asset_type: transaction.asset_type || '',
+    owner: transaction.owner || '', created_at: transaction.created_at || new Date().toISOString(),
+  };
+}
+
+function transactionParams(t, userId) {
+  return [t.id, userId, t.date, t.amount, t.category, t.category_id, t.subcategory, t.type, t.description, t.memo, t.account, t.payment_method, t.asset_type, t.owner, t.created_at];
+}
+
+const insertTransactionSql = `INSERT INTO transactions (id, user_id, date, amount, category, category_id, subcategory, type, description, memo, account, payment_method, asset_type, owner, created_at)
+  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`;
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -200,17 +218,76 @@ app.post('/api/transactions', authenticateToken, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       params
     );
-    res.json({ success: true, id });
+    res.json({ success: true, transaction: normalizeTransaction({ ...t, id }) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+app.put('/api/transactions/:id', authenticateToken, async (req, res) => {
+  try {
+    const db = await getDb();
+    const t = normalizeTransaction({ ...req.body, id: req.params.id });
+    const result = await db.query(
+      `UPDATE transactions SET date=$1, amount=$2, category=$3, category_id=$4, subcategory=$5, type=$6, description=$7, memo=$8, account=$9, payment_method=$10, asset_type=$11, owner=$12, created_at=$13 WHERE id=$14 AND user_id=$15`,
+      [t.date, t.amount, t.category, t.category_id, t.subcategory, t.type, t.description, t.memo, t.account, t.payment_method, t.asset_type, t.owner, t.created_at, req.params.id, req.user.id],
+    );
+    if (result.rowCount === 0) {
+      console.warn('[transactions:update:not-found]', { transactionId: req.params.id, userId: req.user.id });
+      return res.status(404).json({ error: 'Transaction not found' });
+    }
+    res.json({ success: true, transaction: t });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/transactions/batch', authenticateToken, async (req, res) => {
+  const input = Array.isArray(req.body?.transactions) ? req.body.transactions : [];
+  if (!input.length) return res.status(400).json({ error: 'No transactions supplied' });
+  const db = await getDb(); const client = await db.connect();
+  try {
+    const transactions = input.map((item, index) => normalizeTransaction(item, `tx_${Date.now()}_${index}`));
+    await client.query('BEGIN');
+    for (const t of transactions) await client.query(insertTransactionSql, transactionParams(t, req.user.id));
+    await client.query('COMMIT');
+    res.json({ success: true, transactions });
+  } catch (err) { await client.query('ROLLBACK'); res.status(500).json({ error: err.message }); }
+  finally { client.release(); }
+});
+
+app.post('/api/transactions/:id/split', authenticateToken, async (req, res) => {
+  const input = Array.isArray(req.body?.transactions) ? req.body.transactions : [];
+  if (input.length < 2) return res.status(400).json({ error: 'At least two split transactions are required' });
+  const db = await getDb(); const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const originalResult = await client.query('SELECT * FROM transactions WHERE id=$1 AND user_id=$2 FOR UPDATE', [req.params.id, req.user.id]);
+    const original = originalResult.rows[0];
+    if (!original) throw new Error('Transaction not found');
+    const transactions = input.map((item, index) => normalizeTransaction({ ...original, ...item, id: item.id || `${req.params.id}_split_${Date.now()}_${index}` }));
+    if (transactions.reduce((sum, t) => sum + t.amount, 0) !== Number(original.amount)) throw new Error('Split amounts must equal the original transaction amount');
+    await client.query('DELETE FROM transactions WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    for (const t of transactions) await client.query(insertTransactionSql, transactionParams(t, req.user.id));
+    await client.query('COMMIT');
+    res.json({ success: true, transactions });
+  } catch (err) { await client.query('ROLLBACK'); res.status(err.message === 'Transaction not found' ? 404 : 400).json({ error: err.message }); }
+  finally { client.release(); }
+});
+
+app.delete('/api/transactions/month/:yearMonth', authenticateToken, async (req, res) => {
+  if (!/^\d{4}-\d{2}$/.test(req.params.yearMonth)) return res.status(400).json({ error: 'Invalid year-month' });
+  try {
+    const db = await getDb();
+    const result = await db.query('DELETE FROM transactions WHERE user_id=$1 AND date LIKE $2', [req.user.id, `${req.params.yearMonth}%`]);
+    res.json({ success: true, deletedCount: result.rowCount });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.delete('/api/transactions/:id', authenticateToken, async (req, res) => {
   try {
     const db = await getDb();
-    await db.query('DELETE FROM transactions WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
-    res.json({ success: true });
+    const result = await db.query('DELETE FROM transactions WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Transaction not found' });
+    res.json({ success: true, deletedId: req.params.id });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
