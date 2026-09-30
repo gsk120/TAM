@@ -170,13 +170,27 @@ async function saveDatabaseToServer(db, token) {
       headers['Authorization'] = `Bearer ${authToken}`;
     }
 
-    await fetch('/api/db/sync', {
+    const res = await fetch('/api/db/sync', {
       method: 'POST',
       headers,
       body: JSON.stringify(db),
     });
+
+    if (!res.ok) {
+      let message = `Server returned ${res.status}`;
+      try {
+        const data = await res.json();
+        message = data.error || data.details || message;
+      } catch (_) {
+        // HTTP 상태 코드만으로도 저장 실패를 호출자에게 전달한다.
+      }
+      throw new Error(message);
+    }
+
+    return res;
   } catch (err) {
     console.error('Failed to sync database to server:', err);
+    throw err;
   }
 }
 
@@ -191,11 +205,9 @@ export function flushDatabaseSync(token) {
   if (pendingDbToSync) {
     const dataToSync = pendingDbToSync;
     pendingDbToSync = null;
-    try {
-      saveDatabaseToServer(dataToSync, token);
-    } catch (e) {
+    void saveDatabaseToServer(dataToSync, token).catch((e) => {
       console.error('Flush sync failed:', e);
-    }
+    });
   }
 }
 
@@ -211,9 +223,22 @@ export function saveDatabase(db, token) {
 
   if (syncTimeout) clearTimeout(syncTimeout);
   syncTimeout = setTimeout(() => {
-    saveDatabaseToServer(db, token);
+    void saveDatabaseToServer(db, token).catch((err) => {
+      console.error('Deferred database sync failed:', err);
+    });
     pendingDbToSync = null;
   }, 300);
+}
+
+// 사용자에게 저장 완료를 표시해야 하는 작업용 즉시 동기화.
+// 호출자는 성공/실패를 await하여 UI를 결정해야 한다.
+export async function saveDatabaseNow(db, token) {
+  if (syncTimeout) {
+    clearTimeout(syncTimeout);
+    syncTimeout = null;
+  }
+  pendingDbToSync = null;
+  return saveDatabaseToServer(db, token);
 }
 
 export function resetDatabase() {

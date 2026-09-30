@@ -452,10 +452,11 @@ export async function getFullDatabase(userId) {
 let syncQueue = Promise.resolve();
 
 export function syncFullDatabase(userId, fullDb) {
-  syncQueue = syncQueue.then(() => performSync(userId, fullDb)).catch(err => {
+  const operation = syncQueue.then(() => performSync(userId, fullDb));
+  syncQueue = operation.catch(err => {
     console.error('Sync queue error:', err);
   });
-  return syncQueue;
+  return operation;
 }
 
 async function performSync(userId, fullDb) {
@@ -560,4 +561,3 @@ async function performSync(userId, fullDb) {
     client.release();
   }
 }
-

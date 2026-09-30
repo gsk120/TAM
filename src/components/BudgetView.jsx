@@ -16,6 +16,8 @@ export default function BudgetView() {
     addCategory,
     updateCategory,
     deleteCategory,
+    isSavePending,
+    getSaveError,
   } = useApp();
 
   // 입력 필드 로컬 Draft 상태 (타자 입력 시 즉시 반영 방지)
@@ -30,6 +32,8 @@ export default function BudgetView() {
     costType: 'variable',
     isFixed: false,
   });
+  const isCategorySaving = isSavePending('categories');
+  const categorySaveError = getSaveError('categories');
 
   // selectedMonth 또는 activeScenario, effectiveCategoryBudgets 변경 시 로컬 draft 동기화
   useEffect(() => {
@@ -101,12 +105,14 @@ export default function BudgetView() {
   };
 
   // 카테고리 저장 (신규 추가 또는 수정)
-  const handleCategorySubmit = (e) => {
+  const handleCategorySubmit = async (e) => {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
 
     try {
+      if (isCategorySaving) return;
+
       if (!catForm.name || !catForm.name.trim()) {
         alert('카테고리 이름을 입력해주세요.');
         return;
@@ -114,7 +120,7 @@ export default function BudgetView() {
 
       if (editingCategory) {
         const catId = editingCategory.id || editingCategory.name;
-        const res = updateCategory(catId, catForm);
+        const res = await updateCategory(catId, catForm);
         if (!res || !res.success) {
           alert(res?.message || '카테고리 수정 중 오류가 발생했습니다.');
           return;
@@ -468,10 +474,18 @@ export default function BudgetView() {
                   type="button"
                   onClick={handleCategorySubmit}
                   className="btn btn-primary"
+                  disabled={isCategorySaving}
+                  aria-busy={isCategorySaving}
+                  style={isCategorySaving ? { opacity: 0.7, cursor: 'wait' } : undefined}
                 >
-                  {editingCategory ? '수정 완료' : '카테고리 저장'}
+                  {isCategorySaving ? '저장 중…' : (editingCategory ? '수정 완료' : '카테고리 저장')}
                 </button>
               </div>
+              {categorySaveError && (
+                <p role="alert" style={{ margin: 0, color: '#fca5a5', fontSize: '0.82rem' }}>
+                  저장에 실패했습니다. 내용을 확인한 뒤 다시 저장해 주세요.
+                </p>
+              )}
             </form>
           </div>
         </div>
