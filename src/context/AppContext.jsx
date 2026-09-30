@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
-import { loadDatabase, loadDatabaseAsync, saveDatabase, resetDatabase, DEFAULT_BASIC_PRESET } from '../utils/storage';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { loadDatabase, loadDatabaseAsync, saveDatabase, saveDatabaseNow, resetDatabase, DEFAULT_BASIC_PRESET } from '../utils/storage';
 import { calculateMonthlyMetrics, BUDGET_SCENARIOS, EMPTY_ASSET_STRUCTURE, getInitialAssetSnapshot } from '../utils/finance';
+import { createSaveOperationController } from '../utils/saveOperation';
 
 const AppContext = createContext();
 
@@ -21,6 +22,31 @@ export function AppProvider({ children }) {
   const [token, setToken] = useState(() => (typeof localStorage !== 'undefined' ? localStorage.getItem('finance_app_token') || '' : ''));
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [, setSaveStateVersion] = useState(0);
+  const saveOperationControllerRef = useRef(null);
+
+  if (!saveOperationControllerRef.current) {
+    saveOperationControllerRef.current = createSaveOperationController(() => {
+      // 컨트롤러 내부 상태를 사용하는 UI가 최신 상태로 다시 렌더링되도록 한다.
+      setSaveStateVersion(version => version + 1);
+    });
+  }
+
+  // 모든 전용 저장 작업이 공유하는 상태 제어 기반.
+  // 같은 작업 키의 중복 저장은 차단하고, 실패 상태는 화면이 재시도 안내에 활용할 수 있게 보존한다.
+  const runSaveOperation = useCallback(async (operationKey, saveTask) => {
+    return saveOperationControllerRef.current.run(operationKey, saveTask);
+  }, []);
+
+  const isSavePending = useCallback(
+    (operationKey) => saveOperationControllerRef.current.isPending(operationKey),
+    [],
+  );
+
+  const getSaveError = useCallback(
+    (operationKey) => saveOperationControllerRef.current.getError(operationKey),
+    [],
+  );
 
   // 가족 구성원 목록 (DB의 familyMembers 또는 기본값)
   const familyMembers = useMemo(() => {
@@ -515,7 +541,7 @@ export function AppProvider({ children }) {
   };
 
   // 2. 카테고리 정보 수정 (이름 변경 시 거래내역/예산 키 일괄 갱신)
-  const updateCategory = (id, { name, defaultBudget, isFixed, costType }) => {
+  const updateCategory = async (id, { name, defaultBudget, isFixed, costType }) => {
     try {
       const trimmedName = String(name || '').trim();
       if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
@@ -539,7 +565,7 @@ export function AppProvider({ children }) {
       const duplicate = categoriesArr.some(c => c.id !== targetId && c.name !== oldName && c.name === trimmedName);
       if (duplicate) return { success: false, message: '이미 동일한 이름의 다른 카테고리가 존재합니다.' };
 
-      setDb(prev => {
+      const buildUpdatedDb = (prev) => {
         const prevCategories = prev.categories || [];
         const updatedCategories = prevCategories.map(c =>
           (c.id === targetId || c.name === oldName)
@@ -591,9 +617,20 @@ export function AppProvider({ children }) {
           monthlyBudgets: updatedMonthly,
           customBudgetPresets: updatedPresets,
         };
-      });
+      };
 
-      return { success: true };
+      const updatedDb = buildUpdatedDb(db);
+      setDb(updatedDb);
+
+      try {
+        await runSaveOperation('categories', () => saveDatabaseNow(updatedDb, token));
+        return { success: true };
+      } catch (err) {
+        return {
+          success: false,
+          message: `서버 저장에 실패했습니다. 내용을 확인한 뒤 다시 저장해 주세요. (${err.message})`,
+        };
+      }
     } catch (err) {
       console.error('Error in updateCategory:', err);
       return { success: false, message: `카테고리 수정 중 오류 발생: ${err.message}` };
@@ -952,6 +989,8 @@ export function AppProvider({ children }) {
         token,
         user,
         isAuthenticated,
+        isSavePending,
+        getSaveError,
         familyMembers,
         login,
         register,
