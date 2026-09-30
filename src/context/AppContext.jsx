@@ -24,6 +24,7 @@ export function AppProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [, setSaveStateVersion] = useState(0);
   const saveOperationControllerRef = useRef(null);
+  const skipNextFullSyncRef = useRef(false);
 
   if (!saveOperationControllerRef.current) {
     saveOperationControllerRef.current = createSaveOperationController(() => {
@@ -124,6 +125,10 @@ export function AppProvider({ children }) {
   // DB 변경 시 backend 디바운스 자동 동기화
   useEffect(() => {
     if (isBackendLoaded && isAuthenticated && token) {
+      if (skipNextFullSyncRef.current) {
+        skipNextFullSyncRef.current = false;
+        return;
+      }
       saveDatabase(db, token);
     }
   }, [db, isBackendLoaded, isAuthenticated, token]);
@@ -780,83 +785,107 @@ export function AppProvider({ children }) {
 
   // 거래 CRUD 작업 (category_id 자동 보장)
   const resolveCategoryId = (tx) => {
-    if (tx.category_id) return tx.category_id;
     const cat = (db.categories || []).find(c => c.name === tx.category);
     if (cat && cat.id) return cat.id;
     const inc = (db.incomeCategories || INCOME_CATEGORIES).find(i => i.name === tx.category);
     if (inc && inc.id) return inc.id;
-    return '';
+    return tx.category_id || '';
   };
 
-  const addTransaction = (newTx) => {
+  const requestTransactionApi = async (path, options = {}) => {
+    const res = await fetch(path, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(options.headers || {}) },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
+    return data;
+  };
+
+  const applyTransactionState = (updater) => {
+    skipNextFullSyncRef.current = true;
+    setDb(updater);
+  };
+
+  const addTransaction = async (newTx) => {
     const txWithId = {
       ...newTx,
       category_id: resolveCategoryId(newTx),
     };
-    setDb(prev => ({
-      ...prev,
-      transactions: [txWithId, ...prev.transactions],
-    }));
+    try {
+      const data = await runSaveOperation('transactions', () => requestTransactionApi('/api/transactions', { method: 'POST', body: JSON.stringify(txWithId) }));
+      applyTransactionState(prev => ({ ...prev, transactions: [data.transaction || txWithId, ...prev.transactions] }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
-  const updateTransaction = (id, updatedFields) => {
-    setDb(prev => ({
-      ...prev,
-      transactions: prev.transactions.map(t => {
-        if (t.id === id) {
-          const merged = { ...t, ...updatedFields };
-          return { ...merged, category_id: resolveCategoryId(merged) };
+  const updateTransaction = async (id, updatedFields) => {
+    const current = db.transactions.find(t => t.id === id);
+    if (!current) return { success: false, message: '거래를 찾을 수 없습니다.' };
+    const transaction = { ...current, ...updatedFields };
+    transaction.category_id = resolveCategoryId(transaction);
+    try {
+      /* const saveUpdate = async () => {
+        const path = `/api/transactions/${encodeURIComponent(id)}`;
+        const options = { method: 'PUT', body: JSON.stringify(transaction) };
+
+        // 전체 데이터 동기화가 기존 버전에서 진행 중인 경우에도, 해당 거래가
+        // 일시적으로 교체되는 구간을 사용자 오류로 처리하지 않도록 한 번 재시도한다.
+        try {
+          return await requestTransactionApi(path, options);
+        } catch (err) {
+          if (!err.message.startsWith('Transaction not found')) throw err;
+          await new Promise(resolve => setTimeout(resolve, 300));
+          return requestTransactionApi(path, options);
         }
-        return t;
-      }),
-    }));
+      }; */
+      const data = await runSaveOperation('transactions', () => requestTransactionApi(`/api/transactions/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(transaction) }));
+      applyTransactionState(prev => ({ ...prev, transactions: prev.transactions.map(t => t.id === id ? data.transaction : t) }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
-  const deleteTransaction = (id) => {
-    setDb(prev => ({
-      ...prev,
-      transactions: prev.transactions.filter(t => t.id !== id),
-    }));
+  const deleteTransaction = async (id) => {
+    try {
+      await runSaveOperation('transactions', () => requestTransactionApi(`/api/transactions/${encodeURIComponent(id)}`, { method: 'DELETE' }));
+      applyTransactionState(prev => ({ ...prev, transactions: prev.transactions.filter(t => t.id !== id) }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
-  const deleteMonthTransactions = (yearMonth) => {
-    setDb(prev => ({
-      ...prev,
-      transactions: prev.transactions.filter(t => !t.date.startsWith(yearMonth)),
-    }));
+  const deleteMonthTransactions = async (yearMonth) => {
+    try {
+      await runSaveOperation('transactions', () => requestTransactionApi(`/api/transactions/month/${yearMonth}`, { method: 'DELETE' }));
+      applyTransactionState(prev => ({ ...prev, transactions: prev.transactions.filter(t => !t.date.startsWith(yearMonth)) }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
-  const batchImportTransactions = (newTxs) => {
+  const batchImportTransactions = async (newTxs) => {
     const preparedTxs = (newTxs || []).map(tx => ({
       ...tx,
       category_id: resolveCategoryId(tx),
     }));
-    setDb(prev => ({
-      ...prev,
-      transactions: [...preparedTxs, ...prev.transactions],
-    }));
+    try {
+      const data = await runSaveOperation('transactions', () => requestTransactionApi('/api/transactions/batch', { method: 'POST', body: JSON.stringify({ transactions: preparedTxs }) }));
+      applyTransactionState(prev => ({ ...prev, transactions: [...data.transactions, ...prev.transactions] }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
   // 거래 분할
-  const splitTransaction = (origTxId, splitItems) => {
-    setDb(prev => {
-      const origTx = prev.transactions.find(t => t.id === origTxId);
-      if (!origTx) return prev;
-
-      const remainingTxs = prev.transactions.filter(t => t.id !== origTxId);
-      const newSplitTxs = splitItems.map((item, idx) => ({
-        ...origTx,
-        id: `${origTxId}_split_${idx}`,
-        category: item.category,
-        amount: item.amount,
-        description: `${origTx.description} (${item.memo || item.category})`,
-      }));
-
-      return {
-        ...prev,
-        transactions: [...newSplitTxs, ...remainingTxs],
-      };
+  const splitTransaction = async (origTxId, splitItems) => {
+    const origTx = db.transactions.find(t => t.id === origTxId);
+    if (!origTx) return { success: false, message: '원본 거래를 찾을 수 없습니다.' };
+    const transactions = splitItems.map((item, idx) => {
+      const transaction = { ...origTx, id: `${origTxId}_split_${Date.now()}_${idx}`, category: item.category, amount: Number(item.amount) || 0, memo: item.memo || '', description: `${origTx.description} (${item.memo || item.category})` };
+      return { ...transaction, category_id: resolveCategoryId(transaction) };
     });
+    try {
+      const data = await runSaveOperation('transactions', () => requestTransactionApi(`/api/transactions/${encodeURIComponent(origTxId)}/split`, { method: 'POST', body: JSON.stringify({ transactions }) }));
+      applyTransactionState(prev => ({ ...prev, transactions: [...data.transactions, ...prev.transactions.filter(t => t.id !== origTxId)] }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
   // 카테고리 예산 변경 (당월 및 미래 월 적용 - 방안 A)

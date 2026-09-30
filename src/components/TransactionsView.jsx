@@ -6,7 +6,8 @@ import ImportModal from './ImportModal';
 import SplitModal from './SplitModal';
 
 export default function TransactionsView() {
-  const { db, selectedMonth, addTransaction, updateTransaction, deleteTransaction, deleteMonthTransactions, familyMembers } = useApp();
+  const { db, selectedMonth, addTransaction, updateTransaction, deleteTransaction, deleteMonthTransactions, familyMembers, isSavePending } = useApp();
+  const isTransactionSaving = isSavePending('transactions');
 
   // 컬럼별 엑셀 스타일 필터 상태
   const [filterDate, setFilterDate] = useState('ALL');
@@ -90,28 +91,31 @@ export default function TransactionsView() {
   };
 
   // 당월 내역 일괄 삭제 처리
-  const handleConfirmDeleteMonth = () => {
-    deleteMonthTransactions(selectedMonth);
+  const handleConfirmDeleteMonth = async () => {
+    const res = await deleteMonthTransactions(selectedMonth);
+    if (!res.success) return alert(res.message || '거래 삭제에 실패했습니다.');
     setIsDeleteMonthModalOpen(false);
     alert(`${selectedMonth}월 거래 내역이 모두 삭제되었습니다. 엑셀을 다시 업로드할 수 있습니다.`);
   };
 
-  const handleSaveTransaction = (e) => {
+  const handleSaveTransaction = async (e) => {
     e.preventDefault();
     if (!formTx.description || !formTx.amount) return;
 
     if (editingTx) {
-      updateTransaction(editingTx.id, {
+      const res = await updateTransaction(editingTx.id, {
         ...formTx,
         amount: Math.abs(Number(formTx.amount)),
       });
+      if (!res.success) return alert(res.message || '거래 수정에 실패했습니다.');
       setEditingTx(null);
     } else {
-      addTransaction({
+      const res = await addTransaction({
         id: `tx_manual_${Date.now()}`,
         ...formTx,
         amount: Math.abs(Number(formTx.amount)),
       });
+      if (!res.success) return alert(res.message || '거래 등록에 실패했습니다.');
     }
     setIsAddModalOpen(false);
     setFormTx({
@@ -124,6 +128,13 @@ export default function TransactionsView() {
       memo: '',
       isManual: true,
     });
+  };
+
+  const handleDeleteTransaction = async (id) => {
+    if (!confirm('이 거래 내역을 삭제하시겠습니까?')) return;
+    const res = await deleteTransaction(id);
+    if (res.success) alert('거래 내역이 삭제되었습니다.');
+    if (!res.success) alert(res.message || '거래 삭제에 실패했습니다.');
   };
 
   const handleEditClick = (tx) => {
@@ -350,7 +361,8 @@ export default function TransactionsView() {
                           <Edit3 size={16} />
                         </button>
                         <button
-                          onClick={() => deleteTransaction(tx.id)}
+                          onClick={() => handleDeleteTransaction(tx.id)}
+                          disabled={isTransactionSaving}
                           title="삭제"
                           style={{ background: 'transparent', border: 'none', color: 'var(--accent-rose)', cursor: 'pointer', padding: '4px' }}
                         >
@@ -408,7 +420,7 @@ export default function TransactionsView() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button className="btn btn-secondary" onClick={() => setIsDeleteMonthModalOpen(false)}>취소</button>
-              <button className="btn btn-danger" onClick={handleConfirmDeleteMonth}>네, 일괄 삭제합니다</button>
+              <button className="btn btn-danger" onClick={handleConfirmDeleteMonth} disabled={isTransactionSaving}>네, 일괄 삭제합니다</button>
             </div>
           </div>
         </div>
@@ -505,7 +517,7 @@ export default function TransactionsView() {
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsAddModalOpen(false)}>취소</button>
-                <button type="submit" className="btn btn-primary">저장 완료</button>
+                <button type="submit" className="btn btn-primary" disabled={isTransactionSaving}>{isTransactionSaving ? '저장 중…' : '저장 완료'}</button>
               </div>
             </form>
           </div>

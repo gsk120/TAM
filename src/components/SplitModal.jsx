@@ -29,14 +29,18 @@ export default function SplitModal({ tx, onClose }) {
   const currentTotal = splitItems.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const diff = tx.amount - currentTotal;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (diff !== 0) {
       alert(`분할 금액의 합계(${formatKRW(currentTotal)})가 원거래 금액(${formatKRW(tx.amount)})과 일치해야 합니다. (차이: ${formatKRW(diff)})`);
       return;
     }
 
-    splitTransaction(tx.id, splitItems);
+    const res = await splitTransaction(tx.id, splitItems);
+    if (!res.success) {
+      alert(res.message || '거래 분할 저장에 실패했습니다.');
+      return;
+    }
     alert('거래가 정상적으로 분할되었습니다!');
     onClose();
   };
