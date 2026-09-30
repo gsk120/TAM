@@ -1,0 +1,14 @@
+# Keep Cloud Build uploads small and prevent local data/secrets from leaving the workstation.
+.gcloudignore
+.git
+.github
+.env
+node_modules
+dist
+data
+scratch
+*.xlsx
+*backup*.json
+*백업*.json
+*.md
+npm-debug.log

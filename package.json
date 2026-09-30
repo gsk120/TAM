@@ -1,5 +1,5 @@
 {
-  "name": "temp-app",
+  "name": "family-asset-manager",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,7 +9,14 @@
     "start": "node server/index.js",
     "build": "vite build",
     "lint": "oxlint",
+    "test": "node --test test/**/*.test.js",
+    "test:watch": "node --test --watch test/**/*.test.js",
+    "check": "npm run lint && npm run test && npm run build",
     "preview": "vite preview"
+  },
+  "engines": {
+    "node": ">=20 <25",
+    "npm": ">=10"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
