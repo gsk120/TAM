@@ -179,6 +179,103 @@ app.post('/api/db/sync', authenticateToken, async (req, res) => {
   }
 });
 
+// Budget screen state API. It intentionally owns only budget-related data and
+// never performs a whole-database or whole-transaction synchronization.
+app.put('/api/budget/state', authenticateToken, async (req, res) => {
+  const { categories, monthlyBudgets, customBudgetPresets, activeScenario, categoryRename } = req.body || {};
+  if (!Array.isArray(categories) || !monthlyBudgets || !customBudgetPresets || !activeScenario) {
+    return res.status(400).json({ error: 'Invalid budget state payload' });
+  }
+
+  const names = categories.map(category => String(category?.name || '').trim());
+  if (names.some(name => !name) || new Set(names).size !== names.length) {
+    return res.status(400).json({ error: 'Budget categories must have unique names' });
+  }
+
+  const db = await getDb();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    if (categoryRename?.from && categoryRename?.to && categoryRename.from !== categoryRename.to) {
+      await client.query(
+        'UPDATE transactions SET category=$1, category_id=$2 WHERE user_id=$3 AND type=$4 AND category=$5',
+        [categoryRename.to, categoryRename.categoryId || '', req.user.id, '수입', categoryRename.from],
+      );
+    }
+
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['categories', req.user.id, JSON.stringify(categories)],
+    );
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['activeScenario', req.user.id, JSON.stringify(activeScenario)],
+    );
+
+    await client.query('DELETE FROM monthly_budgets WHERE user_id=$1', [req.user.id]);
+    for (const [yearMonth, budgetData] of Object.entries(monthlyBudgets)) {
+      await client.query(
+        'INSERT INTO monthly_budgets (year_month, user_id, budget_data, updated_at) VALUES ($1, $2, $3, $4)',
+        [yearMonth, req.user.id, JSON.stringify(budgetData || {}), new Date().toISOString()],
+      );
+    }
+
+    await client.query('DELETE FROM custom_budget_presets WHERE user_id=$1', [req.user.id]);
+    for (const [presetId, preset] of Object.entries(customBudgetPresets)) {
+      await client.query(
+        'INSERT INTO custom_budget_presets (id, user_id, name, created_at, budgets) VALUES ($1, $2, $3, $4, $5)',
+        [preset.id || presetId, req.user.id, preset.name || presetId, preset.createdAt || new Date().toISOString(), JSON.stringify(preset.budgets || {})],
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/income/categories', authenticateToken, async (req, res) => {
+  const { incomeCategories, categoryRename } = req.body || {};
+  if (!Array.isArray(incomeCategories) || !incomeCategories.length) {
+    return res.status(400).json({ error: 'At least one income category is required' });
+  }
+  const names = incomeCategories.map(category => String(category?.name || '').trim());
+  if (names.some(name => !name) || new Set(names).size !== names.length) {
+    return res.status(400).json({ error: 'Income categories must have unique names' });
+  }
+
+  const db = await getDb();
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    if (categoryRename?.from && categoryRename?.to && categoryRename.from !== categoryRename.to) {
+      await client.query(
+        'UPDATE transactions SET category=$1, category_id=$2 WHERE user_id=$3 AND category=$4',
+        [categoryRename.to, categoryRename.categoryId || '', req.user.id, categoryRename.from],
+      );
+    }
+    await client.query(
+      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
+      ['incomeCategories', req.user.id, JSON.stringify(incomeCategories)],
+    );
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 // 3. 가계부 거래 CRUD API
 app.get('/api/transactions', authenticateToken, async (req, res) => {
   try {

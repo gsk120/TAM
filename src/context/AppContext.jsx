@@ -484,7 +484,7 @@ export function AppProvider({ children }) {
   }, [selectedMonth, db.transactions, getEffectiveCategoryBudgets, db.categories, db.incomeCategories]);
 
   // 1. 카테고리 동적 추가
-  const addCategory = ({ name, defaultBudget, isFixed, costType }) => {
+  const _legacyAddCategory = ({ name, defaultBudget, isFixed, costType }) => {
     const trimmedName = String(name || '').trim();
     if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
 
@@ -546,7 +546,7 @@ export function AppProvider({ children }) {
   };
 
   // 2. 카테고리 정보 수정 (이름 변경 시 거래내역/예산 키 일괄 갱신)
-  const updateCategory = async (id, { name, defaultBudget, isFixed, costType }) => {
+  const _legacyUpdateCategory = async (id, { name, defaultBudget, isFixed, costType }) => {
     try {
       const trimmedName = String(name || '').trim();
       if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
@@ -643,7 +643,7 @@ export function AppProvider({ children }) {
   };
 
   // 3. 카테고리 삭제 (사용 중 거래 검사 방어)
-  const deleteCategory = (id) => {
+  const _legacyDeleteCategory = (id) => {
     if (db.categories.length <= 1) {
       return { success: false, message: '최소 1개 이상의 지출 카테고리가 유지되어야 합니다.' };
     }
@@ -684,7 +684,7 @@ export function AppProvider({ children }) {
   };
 
   // 커스텀 예산 시나리오 저장 / 덮어쓰기
-  const saveCustomBudgetPreset = (presetName, budgetsMap, targetPresetId) => {
+  const _legacySaveCustomBudgetPreset = (presetName, budgetsMap, targetPresetId) => {
     if (!presetName || !presetName.trim()) return;
     const cleanName = presetName.trim();
     const presetId = targetPresetId || `preset_${Date.now()}`;
@@ -726,7 +726,7 @@ export function AppProvider({ children }) {
   };
 
   // 커스텀 예산 시나리오 삭제 (기본안 포함)
-  const deleteCustomBudgetPreset = (presetId) => {
+  const _legacyDeleteCustomBudgetPreset = (presetId) => {
     let nextKey = activeScenario;
     setDb(prev => {
       const updated = { ...(prev.customBudgetPresets || {}) };
@@ -750,7 +750,7 @@ export function AppProvider({ children }) {
   };
 
   // 시나리오 / 커스텀 프리셋 적용
-  const applyBudgetPreset = (key) => {
+  const _legacyApplyBudgetPreset = (key) => {
     setActiveScenario(key);
     if (db.customBudgetPresets && db.customBudgetPresets[key]) {
       const presetBudgets = db.customBudgetPresets[key].budgets || {};
@@ -784,6 +784,104 @@ export function AppProvider({ children }) {
   };
 
   // 거래 CRUD 작업 (category_id 자동 보장)
+  const requestBudgetApi = async (payload) => {
+    const response = await fetch('/api/budget/state', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+    return data;
+  };
+
+  const commitBudgetState = async (operation, nextDb, categoryRename) => {
+    try {
+      await runSaveOperation(operation, () => requestBudgetApi({ categories: nextDb.categories || [], monthlyBudgets: nextDb.monthlyBudgets || {}, customBudgetPresets: nextDb.customBudgetPresets || {}, activeScenario: nextDb.activeScenario || 'basic', categoryRename }));
+      skipNextFullSyncRef.current = true;
+      setDb(nextDb);
+      setActiveScenario(nextDb.activeScenario || 'basic');
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
+  const addCategory = async ({ name, defaultBudget, isFixed, costType }) => {
+    const trimmedName = String(name || '').trim();
+    if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
+    if ((db.categories || []).some(category => category.name === trimmedName)) return { success: false, message: '같은 이름의 카테고리가 이미 있습니다.' };
+    const effectiveCostType = costType || (isFixed ? 'fixed' : 'variable');
+    const newCategory = { id: `cat_user_${Date.now()}`, name: trimmedName, defaultBudget: Number(defaultBudget) || 0, costType: effectiveCostType, isFixed: effectiveCostType === 'fixed', type: '지출' };
+    const monthlyBudgets = { ...(db.monthlyBudgets || {}) };
+    Object.keys(monthlyBudgets).forEach(month => { if (month >= selectedMonth) monthlyBudgets[month] = { ...monthlyBudgets[month], [trimmedName]: newCategory.defaultBudget }; });
+    const customBudgetPresets = { ...(db.customBudgetPresets || {}) };
+    if (customBudgetPresets[activeScenario]) customBudgetPresets[activeScenario] = { ...customBudgetPresets[activeScenario], budgets: { ...(customBudgetPresets[activeScenario].budgets || {}), [trimmedName]: newCategory.defaultBudget } };
+    return commitBudgetState('categories', { ...db, categories: [...(db.categories || []), newCategory], monthlyBudgets, customBudgetPresets });
+  };
+
+  const updateCategory = async (id, { name, defaultBudget, isFixed, costType }) => {
+    const trimmedName = String(name || '').trim();
+    if (!trimmedName) return { success: false, message: '카테고리 이름을 입력해주세요.' };
+    const oldCategory = (db.categories || []).find(category => category.id === id);
+    if (!oldCategory) return { success: false, message: '카테고리를 찾을 수 없습니다.' };
+    if ((db.categories || []).some(category => category.id !== id && category.name === trimmedName)) return { success: false, message: '같은 이름의 카테고리가 이미 있습니다.' };
+    const effectiveCostType = costType || (isFixed ? 'fixed' : 'variable');
+    const categories = db.categories.map(category => category.id === id ? { ...category, name: trimmedName, defaultBudget: Number(defaultBudget) || 0, costType: effectiveCostType, isFixed: effectiveCostType === 'fixed' } : category);
+    const monthlyBudgets = { ...(db.monthlyBudgets || {}) };
+    const customBudgetPresets = { ...(db.customBudgetPresets || {}) };
+    if (oldCategory.name !== trimmedName) {
+      Object.keys(monthlyBudgets).forEach(month => { if (monthlyBudgets[month]?.[oldCategory.name] !== undefined) { const budget = { ...monthlyBudgets[month], [trimmedName]: monthlyBudgets[month][oldCategory.name] }; delete budget[oldCategory.name]; monthlyBudgets[month] = budget; } });
+      Object.keys(customBudgetPresets).forEach(presetId => { const preset = customBudgetPresets[presetId]; if (preset?.budgets?.[oldCategory.name] !== undefined) { const budgets = { ...preset.budgets, [trimmedName]: preset.budgets[oldCategory.name] }; delete budgets[oldCategory.name]; customBudgetPresets[presetId] = { ...preset, budgets }; } });
+    }
+    const transactions = (db.transactions || []).map(transaction => transaction.category === oldCategory.name ? { ...transaction, category: trimmedName, category_id: oldCategory.id } : transaction);
+    return commitBudgetState('categories', { ...db, categories, transactions, monthlyBudgets, customBudgetPresets }, { from: oldCategory.name, to: trimmedName, categoryId: oldCategory.id });
+  };
+
+  const deleteCategory = async (id) => {
+    if ((db.categories || []).length <= 1) return { success: false, message: '최소 1개 이상의 지출 카테고리가 필요합니다.' };
+    const target = (db.categories || []).find(category => category.id === id);
+    if (!target) return { success: false, message: '카테고리를 찾을 수 없습니다.' };
+    const usedCount = (db.transactions || []).filter(transaction => transaction.category === target.name || transaction.category_id === id).length;
+    if (usedCount) return { success: false, message: `'${target.name}'을 사용하는 거래 ${usedCount}건이 있습니다. 먼저 거래의 카테고리를 변경해주세요.` };
+    const monthlyBudgets = { ...(db.monthlyBudgets || {}) };
+    Object.keys(monthlyBudgets).forEach(month => { const budget = { ...monthlyBudgets[month] }; delete budget[target.name]; monthlyBudgets[month] = budget; });
+    const customBudgetPresets = { ...(db.customBudgetPresets || {}) };
+    Object.keys(customBudgetPresets).forEach(presetId => { const budgets = { ...(customBudgetPresets[presetId].budgets || {}) }; delete budgets[target.name]; customBudgetPresets[presetId] = { ...customBudgetPresets[presetId], budgets }; });
+    return commitBudgetState('categories', { ...db, categories: db.categories.filter(category => category.id !== id), monthlyBudgets, customBudgetPresets });
+  };
+
+  const setAllCategoryBudgets = async (budgetsMap) => {
+    const monthlyBudgets = { ...(db.monthlyBudgets || {}) };
+    monthlyBudgets[selectedMonth] = { ...(monthlyBudgets[selectedMonth] || {}), ...budgetsMap };
+    Object.keys(monthlyBudgets).forEach(month => { if (month > selectedMonth) monthlyBudgets[month] = { ...(monthlyBudgets[month] || {}), ...budgetsMap }; });
+    return commitBudgetState('budgets', { ...db, monthlyBudgets });
+  };
+
+  const setCategoryBudget = async (categoryName, amount) => setAllCategoryBudgets({ [categoryName]: Number(amount) || 0 });
+
+  const saveCustomBudgetPreset = async (presetName, budgetsMap, targetPresetId) => {
+    const name = String(presetName || '').trim();
+    if (!name) return { success: false, message: '시나리오 이름을 입력해주세요.' };
+    const id = targetPresetId || `preset_${Date.now()}`;
+    const preset = { id, name, createdAt: new Date().toISOString().slice(0, 10), budgets: { ...(budgetsMap || effectiveCategoryBudgets) } };
+    const monthlyBudgets = { ...(db.monthlyBudgets || {}) };
+    monthlyBudgets[selectedMonth] = { ...(monthlyBudgets[selectedMonth] || {}), ...preset.budgets };
+    Object.keys(monthlyBudgets).forEach(month => { if (month > selectedMonth) monthlyBudgets[month] = { ...(monthlyBudgets[month] || {}), ...preset.budgets }; });
+    return commitBudgetState('budgets', { ...db, activeScenario: id, monthlyBudgets, customBudgetPresets: { ...(db.customBudgetPresets || {}), [id]: preset } });
+  };
+
+  const deleteCustomBudgetPreset = async (presetId) => {
+    const customBudgetPresets = { ...(db.customBudgetPresets || {}) };
+    delete customBudgetPresets[presetId];
+    if (!Object.keys(customBudgetPresets).length) customBudgetPresets.basic = DEFAULT_BASIC_PRESET;
+    const nextScenario = activeScenario === presetId ? Object.keys(customBudgetPresets)[0] : activeScenario;
+    return commitBudgetState('budgets', { ...db, activeScenario: nextScenario, customBudgetPresets });
+  };
+
+  const applyBudgetPreset = async (presetId) => {
+    const preset = db.customBudgetPresets?.[presetId];
+    if (!preset) return { success: false, message: '시나리오를 찾을 수 없습니다.' };
+    const monthlyBudgets = { ...(db.monthlyBudgets || {}) };
+    monthlyBudgets[selectedMonth] = { ...(monthlyBudgets[selectedMonth] || {}), ...(preset.budgets || {}) };
+    Object.keys(monthlyBudgets).forEach(month => { if (month > selectedMonth) monthlyBudgets[month] = { ...(monthlyBudgets[month] || {}), ...(preset.budgets || {}) }; });
+    return commitBudgetState('budgets', { ...db, activeScenario: presetId, monthlyBudgets });
+  };
+
   const resolveCategoryId = (tx) => {
     const cat = (db.categories || []).find(c => c.name === tx.category);
     if (cat && cat.id) return cat.id;
@@ -889,7 +987,7 @@ export function AppProvider({ children }) {
   };
 
   // 카테고리 예산 변경 (당월 및 미래 월 적용 - 방안 A)
-  const setCategoryBudget = (categoryName, amount) => {
+  const _legacySetCategoryBudget = (categoryName, amount) => {
     const num = Number(amount) || 0;
     setDb(prev => {
       const updatedMonthly = { ...(prev.monthlyBudgets || {}) };
@@ -913,7 +1011,7 @@ export function AppProvider({ children }) {
   };
 
   // 전체 카테고리 예산 일괄 [적용] (선택월 및 모든 미래 월 동기화 반영, 과거 보존 - 방안 A)
-  const setAllCategoryBudgets = (budgetsMap) => {
+  const _legacySetAllCategoryBudgets = (budgetsMap) => {
     setDb(prev => {
       const updatedMonthly = { ...(prev.monthlyBudgets || {}) };
       updatedMonthly[selectedMonth] = {
@@ -956,7 +1054,65 @@ export function AppProvider({ children }) {
   };
 
   // 수입 카테고리 동적 CRUD
-  const addIncomeCategory = ({ name, owner }) => {
+  const commitIncomeCategories = async (incomeCategories, categoryRename) => {
+    try {
+      const response = await runSaveOperation('incomeCategories', async () => {
+        const res = await fetch('/api/income/categories', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ incomeCategories, categoryRename }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Server returned ${res.status}`);
+        return data;
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(prev => ({
+        ...prev,
+        incomeCategories,
+        transactions: categoryRename?.from && categoryRename?.to
+          ? (prev.transactions || []).map(transaction =>
+              transaction.type === '수입' && transaction.category === categoryRename.from
+                ? { ...transaction, category: categoryRename.to, category_id: categoryRename.categoryId || transaction.category_id }
+                : transaction,
+            )
+          : prev.transactions,
+      }));
+      return { success: Boolean(response?.success) };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
+  const addIncomeCategory = async ({ name, owner }) => {
+    const trimmedName = String(name || '').trim();
+    if (!trimmedName) return { success: false, message: '수입 카테고리 이름을 입력해주세요.' };
+    const incomeCategories = db.incomeCategories || INCOME_CATEGORIES;
+    if (incomeCategories.some(category => category.name === trimmedName)) return { success: false, message: '이미 존재하는 수입 카테고리 이름입니다.' };
+    const category = { id: `inc_user_${Date.now()}`, name: trimmedName, owner: owner || '가족공동' };
+    return commitIncomeCategories([...incomeCategories, category]);
+  };
+
+  const updateIncomeCategory = async (id, { name, owner }) => {
+    const trimmedName = String(name || '').trim();
+    if (!trimmedName) return { success: false, message: '수입 카테고리 이름을 입력해주세요.' };
+    const incomeCategories = db.incomeCategories || INCOME_CATEGORIES;
+    const oldCategory = incomeCategories.find(category => category.id === id);
+    if (!oldCategory) return { success: false, message: '수입 카테고리를 찾을 수 없습니다.' };
+    if (incomeCategories.some(category => category.id !== id && category.name === trimmedName)) return { success: false, message: '이미 존재하는 수입 카테고리 이름입니다.' };
+    const nextCategories = incomeCategories.map(category => category.id === id ? { ...category, name: trimmedName, owner: owner || '가족공동' } : category);
+    return commitIncomeCategories(nextCategories, { from: oldCategory.name, to: trimmedName, categoryId: id });
+  };
+
+  const deleteIncomeCategory = async (id) => {
+    const incomeCategories = db.incomeCategories || INCOME_CATEGORIES;
+    if (incomeCategories.length <= 1) return { success: false, message: '최소 1개 이상의 수입 카테고리가 필요합니다.' };
+    const target = incomeCategories.find(category => category.id === id);
+    if (!target) return { success: false, message: '수입 카테고리를 찾을 수 없습니다.' };
+    const usedCount = (db.transactions || []).filter(transaction => transaction.category === target.name || transaction.category_id === id).length;
+    if (usedCount) return { success: false, message: `'${target.name}'을 사용하는 거래 ${usedCount}건이 있습니다. 먼저 거래의 카테고리를 변경해주세요.` };
+    return commitIncomeCategories(incomeCategories.filter(category => category.id !== id));
+  };
+
+  const _legacyAddIncomeCategory = ({ name, owner }) => {
     const trimmedName = String(name || '').trim();
     if (!trimmedName) return { success: false, message: '수입 카테고리 이름을 입력해주세요.' };
 
@@ -979,7 +1135,7 @@ export function AppProvider({ children }) {
     return { success: true };
   };
 
-  const updateIncomeCategory = (id, { name, owner }) => {
+  const _legacyUpdateIncomeCategory = (id, { name, owner }) => {
     const trimmedName = String(name || '').trim();
     if (!trimmedName) return { success: false, message: '수입 카테고리 이름을 입력해주세요.' };
 
@@ -998,7 +1154,7 @@ export function AppProvider({ children }) {
     return { success: true };
   };
 
-  const deleteIncomeCategory = (id) => {
+  const _legacyDeleteIncomeCategory = (id) => {
     const incomeList = db.incomeCategories || INCOME_CATEGORIES;
     if (incomeList.length <= 1) {
       return { success: false, message: '최소 1개 이상의 수입 카테고리가 유지되어야 합니다.' };
