@@ -1,4 +1,4 @@
-import React, { useState, useRef, useLayoutEffect } from 'react';
+import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
 import { Landmark, TrendingUp, CreditCard, PiggyBank, BarChart3, LineChart, Trash2, AlertTriangle, Plus, Edit3, X } from 'lucide-react';
@@ -32,7 +32,8 @@ export default function AccountsView() {
   const {
     db,
     selectedMonth,
-    updateAssetSnapshot,
+    getAssetSnapshot,
+    saveAssetSnapshot,
     clearMonthlyAssetSnapshot,
     getAssetMetrics,
     yearlyAssetMetrics,
@@ -40,17 +41,27 @@ export default function AccountsView() {
     addAssetItem,
     updateAssetItem,
     deleteAssetItem,
+    endAssetItem,
     familyMembers,
+    isSavePending,
   } = useApp();
 
-  const cashItems = assetStructure?.cashItems || [];
-  const investItems = assetStructure?.investItems || [];
-  const debtItems = assetStructure?.debtItems || [];
+  const isAssetActive = item => (!item.startMonth || selectedMonth >= item.startMonth) && (!item.endMonth || selectedMonth < item.endMonth);
+  const cashItems = (assetStructure?.cashItems || []).filter(isAssetActive);
+  const investItems = (assetStructure?.investItems || []).filter(isAssetActive);
+  const debtItems = (assetStructure?.debtItems || []).filter(isAssetActive);
 
   const [showClearModal, setShowClearModal] = useState(false);
+  const [deletingAssetItem, setDeletingAssetItem] = useState(null);
   const [hoverTooltip, setHoverTooltip] = useState(null);
+  const [draftSnapshot, setDraftSnapshot] = useState(null);
   const [chart1Ref, chart1Width] = useContainerWidth();
   const [chart2Ref, chart2Width] = useContainerWidth();
+  const isSnapshotSaving = isSavePending('assetSnapshot');
+
+  useEffect(() => {
+    setDraftSnapshot(getAssetSnapshot(selectedMonth));
+  }, [selectedMonth, db.monthlyAssetSnapshots, assetStructure]);
 
   // 세그먼트 탭 상태 ('cash' | 'invest' | 'debt' | 'all')
   const [activeTab, setActiveTab] = useState('cash');
@@ -90,7 +101,7 @@ export default function AccountsView() {
     setIsAssetModalOpen(true);
   };
 
-  const handleAssetSubmit = (e) => {
+  const handleAssetSubmit = async (e) => {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (!assetForm.name || !assetForm.name.trim()) {
       alert('항목 명칭을 입력해 주세요.');
@@ -100,16 +111,14 @@ export default function AccountsView() {
     const snapGroupKey = assetModalGroup === 'cashItems' ? 'cash' : assetModalGroup === 'investItems' ? 'invest' : 'debt';
 
     if (editingAssetItem) {
-      const res = updateAssetItem(assetModalGroup, editingAssetItem.id, assetForm);
+      const res = await updateAssetItem(assetModalGroup, editingAssetItem.id, assetForm);
       if (res && !res.success) {
         alert(res.message);
         return;
       }
-      // 당월 자산 잔액도 수정된 잔액으로 동시 업데이트
-      updateAssetSnapshot(selectedMonth, snapGroupKey, editingAssetItem.id, assetForm.defaultBalance);
       alert(`'${assetForm.name}' 항목 정보가 수정되었습니다.`);
     } else {
-      const res = addAssetItem(assetModalGroup, assetForm);
+      const res = await addAssetItem(assetModalGroup, assetForm);
       if (res && !res.success) {
         alert(res.message);
         return;
@@ -119,13 +128,31 @@ export default function AccountsView() {
     setIsAssetModalOpen(false);
   };
 
-  const handleDeleteAssetItem = (group, item) => {
+  const legacyHandleDeleteAssetItem = (group, item) => {
     if (confirm(`'${item.name}' 항목을 정말 삭제하시겠습니까?`)) {
       const res = deleteAssetItem(group, item.id);
       if (res && !res.success) {
         alert(res.message);
       }
     }
+  };
+
+  const handleDeleteAssetItem = (group, item) => setDeletingAssetItem({ group, item });
+
+  const handleEndAssetItem = async () => {
+    if (!deletingAssetItem) return;
+    const result = await endAssetItem(deletingAssetItem.group, deletingAssetItem.item.id, selectedMonth);
+    if (!result.success) return alert(result.message || '보유 종료 저장에 실패했습니다.');
+    setDeletingAssetItem(null);
+    alert('선택한 월부터 이 자산 항목을 표시하지 않습니다. 이전 월 기록은 유지됩니다.');
+  };
+
+  const handlePermanentDeleteAssetItem = async () => {
+    if (!deletingAssetItem) return;
+    const result = await deleteAssetItem(deletingAssetItem.group, deletingAssetItem.item.id);
+    if (!result.success) return alert(result.message || '자산 항목 삭제에 실패했습니다.');
+    setDeletingAssetItem(null);
+    alert('자산 항목과 모든 월의 기록을 완전 삭제했습니다.');
   };
 
   const {
@@ -137,6 +164,20 @@ export default function AccountsView() {
     netAsset,
     snap,
   } = getAssetMetrics(selectedMonth);
+  const editingSnapshot = draftSnapshot || snap;
+
+  const handleDraftAmountChange = (group, itemId, amount) => {
+    setDraftSnapshot(prev => {
+      const base = prev || snap;
+      return { ...base, [group]: { ...(base[group] || {}), [itemId]: Number(amount) || 0 } };
+    });
+  };
+
+  const handleSaveSnapshot = async () => {
+    const result = await saveAssetSnapshot(selectedMonth, editingSnapshot);
+    if (!result.success) return alert(result.message || '자산 금액 저장에 실패했습니다.');
+    alert('자산 금액이 저장되었습니다.');
+  };
 
   // 직전 월 (MoM) 순자산 지표 연산
   const getPrevYearMonth = (ym) => {
@@ -154,8 +195,9 @@ export default function AccountsView() {
 
   const [yearStr, monthStr] = selectedMonth.split('-');
 
-  const handleConfirmClear = () => {
-    clearMonthlyAssetSnapshot(selectedMonth);
+  const handleConfirmClear = async () => {
+    const result = await clearMonthlyAssetSnapshot(selectedMonth);
+    if (!result.success) return alert(result.message || '당월 자산 초기화에 실패했습니다.');
     setShowClearModal(false);
   };
 
@@ -172,6 +214,14 @@ export default function AccountsView() {
           </p>
         </div>
 
+        <button
+          className="btn btn-primary"
+          onClick={handleSaveSnapshot}
+          disabled={isSnapshotSaving}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto' }}
+        >
+          {isSnapshotSaving ? '저장 중…' : '자산 금액 저장'}
+        </button>
         <button
           className="btn btn-secondary"
           onClick={() => setShowClearModal(true)}
@@ -424,7 +474,7 @@ export default function AccountsView() {
                     </tr>
                   ) : (
                     cashItems.map(item => {
-                      const val = snap.cash?.[item.id] ?? 0;
+                      const val = editingSnapshot.cash?.[item.id] ?? 0;
                       return (
                         <tr key={item.id}>
                           <td style={{ fontWeight: '600', color: '#fff' }}>{item.name}</td>
@@ -438,7 +488,7 @@ export default function AccountsView() {
                               style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
                               value={formatInputNumber(val)}
                               onFocus={e => e.target.select()}
-                              onChange={e => updateAssetSnapshot(selectedMonth, 'cash', item.id, parseInputNumber(e.target.value))}
+                              onChange={e => handleDraftAmountChange('cash', item.id, parseInputNumber(e.target.value))}
                             />
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -516,7 +566,7 @@ export default function AccountsView() {
                     </tr>
                   ) : (
                     investItems.map(item => {
-                      const val = snap.invest?.[item.id] ?? snap.invest?.[item.name] ?? 0;
+                      const val = editingSnapshot.invest?.[item.id] ?? editingSnapshot.invest?.[item.name] ?? 0;
 
                       return (
                         <tr key={item.id}>
@@ -533,7 +583,7 @@ export default function AccountsView() {
                               style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
                               value={formatInputNumber(val)}
                               onFocus={e => e.target.select()}
-                              onChange={e => updateAssetSnapshot(selectedMonth, 'invest', item.id, parseInputNumber(e.target.value))}
+                              onChange={e => handleDraftAmountChange('invest', item.id, parseInputNumber(e.target.value))}
                             />
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -621,7 +671,7 @@ export default function AccountsView() {
                     </tr>
                   ) : (
                     debtItems.map(item => {
-                      const val = snap.debt?.[item.id] ?? 0;
+                      const val = editingSnapshot.debt?.[item.id] ?? 0;
                       return (
                         <tr key={item.id}>
                           <td style={{ fontWeight: '600', color: '#fff' }}>{item.name}</td>
@@ -635,7 +685,7 @@ export default function AccountsView() {
                               style={{ maxWidth: '200px', padding: '6px 10px', textAlign: 'right', fontWeight: '600', width: '100%' }}
                               value={formatInputNumber(val)}
                               onFocus={e => e.target.select()}
-                              onChange={e => updateAssetSnapshot(selectedMonth, 'debt', item.id, parseInputNumber(e.target.value))}
+                              onChange={e => handleDraftAmountChange('debt', item.id, parseInputNumber(e.target.value))}
                             />
                           </td>
                           <td style={{ textAlign: 'center' }}>
@@ -1148,6 +1198,27 @@ export default function AccountsView() {
       )}
 
       {/* 자산/부채 항목 동적 추가 / 수정 모달 */}
+      {deletingAssetItem && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '460px', borderLeft: '4px solid var(--accent-amber)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+              <AlertTriangle color="var(--accent-amber)" size={24} />
+              <h3 style={{ fontSize: '1.15rem', fontWeight: '700', color: '#fff' }}>자산 항목 삭제 방법 선택</h3>
+            </div>
+            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '20px' }}>
+              <strong style={{ color: '#fff' }}>{deletingAssetItem.item.name}</strong> 항목을 어떻게 처리할까요?<br />
+              <strong style={{ color: '#fbbf24' }}>선택 월부터 보유 종료</strong>는 {yearStr}년 {parseInt(monthStr)}월부터 숨기며, 이전 월 자산 기록은 보존합니다.<br />
+              <strong style={{ color: 'var(--accent-rose)' }}>완전 삭제</strong>는 잘못 등록한 항목에만 사용하세요. 모든 월의 기록도 함께 삭제됩니다.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setDeletingAssetItem(null)}>취소</button>
+              <button type="button" className="btn btn-secondary" style={{ borderColor: '#f59e0b', color: '#fbbf24' }} onClick={handleEndAssetItem}>선택 월부터 보유 종료</button>
+              <button type="button" className="btn btn-primary" style={{ background: 'linear-gradient(135deg, #f43f5e, #e11d48)' }} onClick={handlePermanentDeleteAssetItem}>완전 삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isAssetModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '420px' }}>
@@ -1208,7 +1279,7 @@ export default function AccountsView() {
                 </select>
               </div>
 
-              <div>
+              <div style={{ display: editingAssetItem ? 'none' : 'block' }}>
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '6px' }}>
                   초기/기본 잔액 (원, 선택 사항)
                 </label>

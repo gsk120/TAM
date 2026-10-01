@@ -1,16 +1,30 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import * as XLSX from 'xlsx';
 import { Download, Upload, RotateCcw, ShieldCheck, Users, Plus, Trash2, Edit3, Check } from 'lucide-react';
 
 export default function SettingsView() {
-  const { db, handleReset, importFullDatabase, familyMembers, updateFamilyMembers } = useApp();
+  const { db, handleReset, importFullDatabase, familyMembers, updateFamilyMembers, isSavePending } = useApp();
 
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberColor, setNewMemberColor] = useState('#3b82f6');
   const [editingId, setEditingId] = useState(null);
   const [editingName, setEditingName] = useState('');
   const [editingColor, setEditingColor] = useState('');
+  const isFamilySaving = isSavePending('familyMembers');
+  const isRestoreSaving = isSavePending('databaseRestore');
+  const isResetSaving = isSavePending('databaseReset');
+  const isDataOperationSaving = isRestoreSaving || isResetSaving;
+
+  useEffect(() => {
+    if (!isDataOperationSaving) return undefined;
+    const warnBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [isDataOperationSaving]);
 
   // CSV/Excel 거래 내역 내보내기
   const handleExportExcel = () => {
@@ -41,7 +55,9 @@ export default function SettingsView() {
       try {
         const importedData = JSON.parse(event.target.result);
         if (importedData && typeof importedData === 'object' && (Array.isArray(importedData.transactions) || importedData.monthlyAssetSnapshots || importedData.categories)) {
-          importFullDatabase(importedData);
+          if (!window.confirm('현재 모든 데이터를 백업 파일 내용으로 교체합니다. 계속하시겠습니까?')) return;
+          const result = await importFullDatabase(importedData);
+          if (!result.success) return alert(result.message || '백업 복원에 실패했습니다.');
           alert('✅ 백업 데이터가 성공적으로 복원되었습니다!');
         } else {
           alert('⚠️ 유효하지 않은 백업 파일 형식입니다.');
@@ -55,27 +71,30 @@ export default function SettingsView() {
   };
 
   // 가족 구성원 추가
-  const handleAddMember = (e) => {
+  const handleAddMember = async (e) => {
     e.preventDefault();
     if (!newMemberName.trim()) return;
+    if (familyMembers.some(member => member.name === newMemberName.trim())) return alert('이미 등록된 구성원 이름입니다.');
     const newMember = {
       id: `m_${Date.now()}`,
       name: newMemberName.trim(),
       color: newMemberColor,
     };
-    updateFamilyMembers([...familyMembers, newMember]);
+    const result = await updateFamilyMembers([...familyMembers, newMember]);
+    if (!result.success) return alert(result.message || '구성원 추가에 실패했습니다.');
     setNewMemberName('');
     setNewMemberColor('#3b82f6');
   };
 
   // 가족 구성원 삭제
-  const handleDeleteMember = (id) => {
+  const handleDeleteMember = async (id) => {
     if (familyMembers.length <= 1) {
       alert('최소 1명의 가족 구성원이 등록되어 있어야 합니다.');
       return;
     }
     if (window.confirm('해당 가족 구성원을 삭제하시겠습니까?')) {
-      updateFamilyMembers(familyMembers.filter(m => m.id !== id));
+      const result = await updateFamilyMembers(familyMembers.filter(m => m.id !== id));
+      if (!result.success) alert(result.message || '사용 중인 구성원은 삭제할 수 없습니다.');
     }
   };
 
@@ -87,9 +106,16 @@ export default function SettingsView() {
   };
 
   // 편집 저장
-  const handleSaveEdit = (id) => {
+  const handleSaveEdit = async (id) => {
     if (!editingName.trim()) return;
-    updateFamilyMembers(familyMembers.map(m => m.id === id ? { ...m, name: editingName.trim(), color: editingColor } : m));
+    const member = familyMembers.find(m => m.id === id);
+    if (!member) return;
+    if (familyMembers.some(m => m.id !== id && m.name === editingName.trim())) return alert('이미 등록된 구성원 이름입니다.');
+    const result = await updateFamilyMembers(
+      familyMembers.map(m => m.id === id ? { ...m, name: editingName.trim(), color: editingColor } : m),
+      member.name === editingName.trim() ? undefined : { from: member.name, to: editingName.trim() },
+    );
+    if (!result.success) return alert(result.message || '구성원 수정에 실패했습니다.');
     setEditingId(null);
   };
 
@@ -232,7 +258,7 @@ export default function SettingsView() {
               outline: 'none',
             }}
           />
-          <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button type="submit" className="btn btn-primary" disabled={isFamilySaving} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <Plus size={16} /> 구성원 추가
           </button>
         </form>
@@ -283,7 +309,7 @@ export default function SettingsView() {
             style={{ display: 'none' }}
             onChange={handleImportJSON}
           />
-          <label htmlFor="json-import-input" className="btn btn-secondary" style={{ marginTop: 'auto', cursor: 'pointer', textAlign: 'center' }}>
+          <label htmlFor="json-import-input" className="btn btn-secondary" style={{ marginTop: 'auto', cursor: isRestoreSaving ? 'wait' : 'pointer', textAlign: 'center', opacity: isRestoreSaving ? 0.65 : 1, pointerEvents: isRestoreSaving ? 'none' : 'auto' }}>
             백업 파일 선택 및 복원
           </label>
         </div>
@@ -299,10 +325,12 @@ export default function SettingsView() {
           </p>
           <button
             className="btn btn-danger"
-            onClick={() => {
+            disabled={isDataOperationSaving}
+            onClick={async () => {
               if (window.confirm('정말로 모든 데이터를 초기화하고 기본 설정 상태로 되돌리시겠습니까?')) {
-                handleReset();
-                alert('초기화되었습니다.');
+                const result = await handleReset();
+                if (!result.success) return alert(result.message || '전체 초기화에 실패했습니다.');
+                alert('모든 데이터를 초기화했습니다.');
               }
             }}
             style={{ marginTop: 'auto' }}
@@ -311,7 +339,16 @@ export default function SettingsView() {
           </button>
         </div>
       </div>
+
+      {isDataOperationSaving && (
+        <div className="modal-overlay" style={{ zIndex: 2000, background: 'rgba(2, 6, 23, 0.88)' }}>
+          <div className="modal-content" style={{ maxWidth: '460px', textAlign: 'center', border: '1px solid var(--accent-cyan)', boxShadow: '0 0 48px rgba(34, 211, 238, 0.25)' }}>
+            <div style={{ width: '42px', height: '42px', border: '4px solid rgba(34, 211, 238, 0.25)', borderTopColor: 'var(--accent-cyan)', borderRadius: '50%', margin: '4px auto 18px', animation: 'spin 0.8s linear infinite' }} />
+            <h3 style={{ color: '#fff', fontSize: '1.2rem', marginBottom: '12px' }}>{isRestoreSaving ? '백업 데이터를 복원하고 있습니다' : '모든 데이터를 초기화하고 있습니다'}</h3>
+            <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>작업이 완료될 때까지 탭 이동, 새로고침, 창 닫기를 할 수 없습니다.<br />잠시만 기다려 주세요.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-

@@ -192,11 +192,32 @@ export function AppProvider({ children }) {
   };
 
   // 가족 구성원 목록 업데이트 핸들러
-  const updateFamilyMembers = (newMembers) => {
-    setDb(prev => ({
-      ...prev,
-      familyMembers: newMembers,
-    }));
+  const updateFamilyMembers = async (newMembers, ownerRename) => {
+    try {
+      let responseData;
+      await runSaveOperation('familyMembers', async () => {
+        const response = await fetch('/api/family-members', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ familyMembers: newMembers, ownerRename }),
+        });
+        responseData = await response.json();
+        if (!response.ok) throw new Error(responseData.error || `Server returned ${response.status}`);
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(prev => {
+        const renameOwner = value => ownerRename?.from && value === ownerRename.from ? ownerRename.to : value;
+        const structure = responseData.assetStructure || prev.assetStructure;
+        return {
+          ...prev,
+          familyMembers: newMembers,
+          transactions: (prev.transactions || []).map(transaction => ({ ...transaction, owner: renameOwner(transaction.owner) })),
+          incomeCategories: responseData.incomeCategories || (prev.incomeCategories || []).map(category => ({ ...category, owner: renameOwner(category.owner) })),
+          assetStructure: structure,
+        };
+      });
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
   };
 
 
@@ -209,7 +230,7 @@ export function AppProvider({ children }) {
   };
 
   // 특정 월의 스냅샷 항목 수기 업데이트
-  const updateAssetSnapshot = (yearMonth, group, itemId, newAmount) => {
+  const legacyUpdateAssetSnapshot = (yearMonth, group, itemId, newAmount) => {
     setDb(prev => {
       const existingSnapshots = prev.monthlyAssetSnapshots || {};
       const currentMonthSnap = existingSnapshots[yearMonth] || getAssetSnapshot(yearMonth);
@@ -234,8 +255,25 @@ export function AppProvider({ children }) {
     });
   };
 
+  const saveAssetSnapshot = async (yearMonth, snapshot) => {
+    try {
+      await runSaveOperation('assetSnapshot', async () => {
+        const response = await fetch(`/api/assets/snapshots/${yearMonth}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ snapshot }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(prev => ({ ...prev, monthlyAssetSnapshots: { ...(prev.monthlyAssetSnapshots || {}), [yearMonth]: snapshot } }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
   // 선택된 당월 자산 수기 데이터 전체 초기화
-  const clearMonthlyAssetSnapshot = (yearMonth) => {
+  const legacyClearMonthlyAssetSnapshot = (yearMonth) => {
     setDb(prev => {
       const existingSnapshots = { ...(prev.monthlyAssetSnapshots || {}) };
       delete existingSnapshots[yearMonth];
@@ -247,7 +285,7 @@ export function AppProvider({ children }) {
   };
 
   // 자산 항목 신규 추가 (group: 'cashItems' | 'investItems' | 'debtItems')
-  const addAssetItem = (group, itemForm) => {
+  const legacyAddAssetItem = (group, itemForm) => {
     const name = String(itemForm.name || '').trim();
     if (!name) return { success: false, message: '항목 명칭을 입력해주세요.' };
 
@@ -299,7 +337,7 @@ export function AppProvider({ children }) {
   };
 
   // 자산 항목 정보 수정
-  const updateAssetItem = (group, id, itemForm) => {
+  const legacyUpdateAssetItem = (group, id, itemForm) => {
     const name = String(itemForm.name || '').trim();
     if (!name) return { success: false, message: '항목 명칭을 입력해주세요.' };
 
@@ -331,7 +369,7 @@ export function AppProvider({ children }) {
   };
 
   // 자산 항목 삭제 (전 월 스냅샷 고아 키 자동 청소)
-  const deleteAssetItem = (group, id) => {
+  const legacyDeleteAssetItem = (group, id) => {
     setDb(prev => {
       const prevStruct = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
       const targetGroupList = prevStruct[group] || [];
@@ -364,21 +402,121 @@ export function AppProvider({ children }) {
     return { success: true };
   };
 
+  const legacyEndAssetItem = (group, id, endMonth) => {
+    setDb(prev => {
+      const structure = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
+      return {
+        ...prev,
+        assetStructure: {
+          ...structure,
+          [group]: (structure[group] || []).map(item => item.id === id ? { ...item, endMonth } : item),
+        },
+      };
+    });
+    return { success: true };
+  };
+
   // 특정 월의 종합 자산 지표 (총자산, 투자자산, 부채, 순자산, 현금성자산) 계산
+  // Asset changes use focused APIs and never call the legacy full-database sync.
+  const saveAssetStructure = async (assetStructureToSave) => {
+    try {
+      await runSaveOperation('assetStructure', async () => {
+        const response = await fetch('/api/assets/structure', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ assetStructure: assetStructureToSave }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(prev => ({ ...prev, assetStructure: assetStructureToSave }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
+  const clearMonthlyAssetSnapshot = async (yearMonth) => {
+    try {
+      await runSaveOperation('assetSnapshot', async () => {
+        const response = await fetch(`/api/assets/snapshots/${yearMonth}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(prev => { const snapshots = { ...(prev.monthlyAssetSnapshots || {}) }; delete snapshots[yearMonth]; return { ...prev, monthlyAssetSnapshots: snapshots }; });
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
+  const addAssetItem = async (group, itemForm) => {
+    const name = String(itemForm.name || '').trim();
+    if (!name) return { success: false, message: '자산 항목 명칭을 입력해 주세요.' };
+    const prefix = ({ cashItems: 'acc', investItems: 'inv', debtItems: 'debt' })[group] || 'asset';
+    const id = `${prefix}_user_${Date.now()}`;
+    const item = { id, name, owner: itemForm.owner || '가족공동', defaultBalance: Number(itemForm.defaultBalance) || 0, isRealEstate: group === 'investItems' && Boolean(itemForm.isRealEstate) };
+    item.startMonth = selectedMonth;
+    const structure = db.assetStructure || EMPTY_ASSET_STRUCTURE;
+    const updatedStructure = { ...structure, [group]: [...(structure[group] || []), item] };
+    const result = await saveAssetStructure(updatedStructure);
+    if (!result.success) return result;
+    const snapshotKey = group === 'cashItems' ? 'cash' : group === 'investItems' ? 'invest' : 'debt';
+    const baseSnapshot = getAssetSnapshot(selectedMonth);
+    return saveAssetSnapshot(selectedMonth, { ...baseSnapshot, [snapshotKey]: { ...(baseSnapshot[snapshotKey] || {}), [id]: item.defaultBalance } });
+  };
+
+  const updateAssetItem = async (group, id, itemForm) => {
+    const name = String(itemForm.name || '').trim();
+    if (!name) return { success: false, message: '자산 항목 명칭을 입력해 주세요.' };
+    const structure = db.assetStructure || EMPTY_ASSET_STRUCTURE;
+    const updatedStructure = { ...structure, [group]: (structure[group] || []).map(item => item.id === id ? { ...item, name, owner: itemForm.owner || '가족공동', isRealEstate: group === 'investItems' ? Boolean(itemForm.isRealEstate) : item.isRealEstate } : item) };
+    return saveAssetStructure(updatedStructure);
+  };
+
+  const endAssetItem = async (group, id, endMonth) => {
+    const structure = db.assetStructure || EMPTY_ASSET_STRUCTURE;
+    const updatedStructure = { ...structure, [group]: (structure[group] || []).map(item => item.id === id ? { ...item, endMonth } : item) };
+    return saveAssetStructure(updatedStructure);
+  };
+
+  const deleteAssetItem = async (group, id) => {
+    try {
+      await runSaveOperation('assetStructure', async () => {
+        const response = await fetch(`/api/assets/items/${group}/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+      });
+      const snapshotKey = group === 'cashItems' ? 'cash' : group === 'investItems' ? 'invest' : 'debt';
+      skipNextFullSyncRef.current = true;
+      setDb(prev => {
+        const structure = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
+        const snapshots = Object.fromEntries(Object.entries(prev.monthlyAssetSnapshots || {}).map(([month, snapshot]) => {
+          const values = { ...(snapshot[snapshotKey] || {}) }; delete values[id];
+          return [month, { ...snapshot, [snapshotKey]: values }];
+        }));
+        return { ...prev, assetStructure: { ...structure, [group]: (structure[group] || []).filter(item => item.id !== id) }, monthlyAssetSnapshots: snapshots };
+      });
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
   const getAssetMetrics = (yearMonth) => {
     const snap = getAssetSnapshot(yearMonth);
-    const cashTotal = cashList.reduce((acc, item) => acc + (Number(snap.cash?.[item.id]) || 0), 0);
-    const investTotal = investList.reduce((acc, item) => acc + (Number(snap.invest?.[item.id]) || 0), 0);
+    const isActiveInMonth = item => (!item.startMonth || yearMonth >= item.startMonth) && (!item.endMonth || yearMonth < item.endMonth);
+    const activeCashList = cashList.filter(isActiveInMonth);
+    const activeInvestList = investList.filter(isActiveInMonth);
+    const activeDebtList = debtList.filter(isActiveInMonth);
+    const cashTotal = activeCashList.reduce((acc, item) => acc + (Number(snap.cash?.[item.id]) || 0), 0);
+    const investTotal = activeInvestList.reduce((acc, item) => acc + (Number(snap.invest?.[item.id]) || 0), 0);
     
     // 부동산 자산 금액 (isRealEstate === true 인 항목 합산)
-    const realEstateAmount = investList
+    const realEstateAmount = activeInvestList
       .filter(item => item.isRealEstate)
       .reduce((acc, item) => acc + (Number(snap.invest?.[item.id]) || 0), 0);
 
     const assetTotal = cashTotal + investTotal;
     const investRatio = assetTotal > 0 ? ((investTotal - realEstateAmount) / assetTotal) * 100 : 0;
 
-    const debtTotal = debtList.reduce((acc, item) => acc + (Number(snap.debt?.[item.id]) || 0), 0);
+    const debtTotal = activeDebtList.reduce((acc, item) => acc + (Number(snap.debt?.[item.id]) || 0), 0);
     const netAsset = assetTotal - debtTotal;
 
     return {
@@ -1042,18 +1180,40 @@ export function AppProvider({ children }) {
   };
 
   // DB 초기화
-  const handleReset = () => {
+  const legacyHandleReset = () => {
     const freshDb = resetDatabase();
     setDb(freshDb);
   };
 
   // 전체 백업 JSON 데이터베이스 복원 및 백엔드 DB 동기화
-  const importFullDatabase = (importedDb) => {
+  const legacyImportFullDatabase = (importedDb) => {
     setDb(importedDb);
     saveDatabase(importedDb);
   };
 
   // 수입 카테고리 동적 CRUD
+  const replaceDatabaseFromServer = async (operation, path, body) => {
+    try {
+      let result;
+      await runSaveOperation(operation, async () => {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+        result = await response.json();
+        if (!response.ok) throw new Error(result.error || `Server returned ${response.status}`);
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(result.database);
+      setActiveScenario(result.database?.activeScenario || 'basic');
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
+  const handleReset = () => replaceDatabaseFromServer('databaseReset', '/api/database/reset', {});
+  const importFullDatabase = (importedDb) => replaceDatabaseFromServer('databaseRestore', '/api/database/restore', { backup: importedDb });
+
   const commitIncomeCategories = async (incomeCategories, categoryRename) => {
     try {
       const response = await runSaveOperation('incomeCategories', async () => {
@@ -1190,7 +1350,7 @@ export function AppProvider({ children }) {
         currentMetrics,
         yearlyMetrics,
         getAssetSnapshot,
-        updateAssetSnapshot,
+        saveAssetSnapshot,
         clearMonthlyAssetSnapshot,
         getAssetMetrics,
         yearlyAssetMetrics,
@@ -1218,6 +1378,7 @@ export function AppProvider({ children }) {
         addAssetItem,
         updateAssetItem,
         deleteAssetItem,
+        endAssetItem,
       }}
     >
       {children}
