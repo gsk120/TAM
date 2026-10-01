@@ -33,6 +33,7 @@ export default function BudgetView() {
     isFixed: false,
   });
   const isCategorySaving = isSavePending('categories');
+  const isBudgetSaving = isSavePending('budgets');
   const categorySaveError = getSaveError('categories');
 
   // selectedMonth 또는 activeScenario, effectiveCategoryBudgets 변경 시 로컬 draft 동기화
@@ -49,30 +50,34 @@ export default function BudgetView() {
   };
 
   // [적용] 버튼 클릭 시 당월 및 미래 월에 일괄 반영
-  const handleApply = () => {
-    setAllCategoryBudgets(draftBudgets);
+  const handleApply = async () => {
+    const result = await setAllCategoryBudgets(draftBudgets);
+    if (!result?.success) return alert(result?.message || '예산 저장에 실패했습니다.');
     alert(`${selectedMonth}월 및 미래 모든 월에 예산 설정이 '적용'되었습니다!\n(과거 월 예산은 기존 설정대로 보존됩니다)`);
   };
 
   // [시나리오 저장] 버튼 클릭 시 현재 draftBudgets 저장 또는 덮어쓰기
-  const handleSaveScenario = () => {
+  const handleSaveScenario = async () => {
     const activePreset = db.customBudgetPresets?.[activeScenario];
     const defaultName = activePreset ? activePreset.name : '기본안';
     const inputName = prompt('현재 입력된 예산 현황을 시나리오로 저장합니다.\n기존 시나리오 이름으로 덮어쓰거나, 새로운 시나리오 이름을 입력하세요:', defaultName);
     if (inputName && inputName.trim()) {
       const cleanName = inputName.trim();
       const targetId = (activePreset && cleanName === activePreset.name) ? activeScenario : undefined;
-      saveCustomBudgetPreset(cleanName, draftBudgets, targetId);
+      const result = await saveCustomBudgetPreset(cleanName, draftBudgets, targetId);
+      if (!result?.success) return alert(result?.message || '시나리오 저장에 실패했습니다.');
       alert(`'${cleanName}' 시나리오가 저장되었습니다.`);
     }
   };
 
   // [시나리오 삭제] 버튼 클릭 ("기본안" 포함 삭제 가능)
-  const handleDeleteScenario = () => {
+  const handleDeleteScenario = async () => {
     const activePreset = db.customBudgetPresets?.[activeScenario];
     const presetName = activePreset ? activePreset.name : '선택된 시나리오';
     if (confirm(`'${presetName}' 시나리오를 정말 삭제하시겠습니까?`)) {
-      deleteCustomBudgetPreset(activeScenario);
+      const result = await deleteCustomBudgetPreset(activeScenario);
+      if (!result?.success) return alert(result?.message || '시나리오 삭제에 실패했습니다.');
+      alert(`'${presetName}' 시나리오가 삭제되었습니다.`);
     }
   };
 
@@ -127,7 +132,7 @@ export default function BudgetView() {
         }
         alert(`'${catForm.name}' 카테고리 정보가 수정되었습니다.`);
       } else {
-        const res = addCategory(catForm);
+        const res = await addCategory(catForm);
         if (!res || !res.success) {
           alert(res?.message || '카테고리 추가 중 오류가 발생했습니다.');
           return;
@@ -143,8 +148,8 @@ export default function BudgetView() {
   };
 
   // 카테고리 삭제 실행
-  const handleDeleteCategoryClick = (cat) => {
-    const res = deleteCategory(cat.id);
+  const handleDeleteCategoryClick = async (cat) => {
+    const res = await deleteCategory(cat.id);
     if (!res.success) {
       alert(res.message);
       return;
@@ -179,7 +184,11 @@ export default function BudgetView() {
               className="select"
               style={{ width: 'auto', padding: '4px 8px' }}
               value={activeScenario}
-              onChange={e => applyBudgetPreset(e.target.value)}
+              onChange={async e => {
+                const result = await applyBudgetPreset(e.target.value);
+                if (!result?.success) alert(result?.message || '시나리오 적용에 실패했습니다.');
+              }}
+              disabled={isBudgetSaving}
             >
               {presetsList.map(preset => (
                 <option key={preset.id} value={preset.id}>
@@ -205,6 +214,7 @@ export default function BudgetView() {
           {/* 시나리오 저장 버튼 */}
           <button
             onClick={handleSaveScenario}
+            disabled={isBudgetSaving}
             className="btn"
             style={{
               padding: '7px 12px',
@@ -222,6 +232,7 @@ export default function BudgetView() {
           {/* 시나리오 삭제 버튼 */}
           <button
             onClick={handleDeleteScenario}
+            disabled={isBudgetSaving}
             className="btn"
             style={{
               padding: '7px 10px',
@@ -239,6 +250,7 @@ export default function BudgetView() {
           {/* [적용] 버튼 */}
           <button
             onClick={handleApply}
+            disabled={isBudgetSaving}
             className="btn btn-primary"
             style={{
               padding: '8px 18px',
@@ -262,12 +274,13 @@ export default function BudgetView() {
             {formatKRW(draftTotalBudget)}
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'none' }} aria-hidden="true">
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             * 전체 지출 카테고리의 예산 합계액입니다.
           </span>
           <button
             onClick={handleApply}
+            disabled={isBudgetSaving}
             className="btn btn-primary"
             style={{ padding: '8px 18px', fontSize: '0.9rem', fontWeight: '700' }}
           >

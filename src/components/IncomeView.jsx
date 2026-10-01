@@ -4,7 +4,8 @@ import { formatKRW } from '../utils/finance';
 import { Plus, Edit2, Trash2, X, ChevronDown, Info } from 'lucide-react';
 
 export default function IncomeView() {
-  const { db, currentMetrics, yearlyMetrics, selectedMonth, addIncomeCategory, updateIncomeCategory, deleteIncomeCategory, familyMembers } = useApp();
+  const { db, currentMetrics, yearlyMetrics, selectedMonth, addIncomeCategory, updateIncomeCategory, deleteIncomeCategory, familyMembers, isSavePending } = useApp();
+  const isIncomeSaving = isSavePending('incomeCategories');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
@@ -70,18 +71,18 @@ export default function IncomeView() {
     setIsModalOpen(true);
   };
 
-  const handleSaveModal = (e) => {
+  const handleSaveModal = async (e) => {
     e.preventDefault();
     setModalMsg('');
 
     if (editingCategory) {
-      const res = updateIncomeCategory(editingCategory.id, { name: nameInput, owner: ownerInput });
+      const res = await updateIncomeCategory(editingCategory.id, { name: nameInput, owner: ownerInput });
       if (!res.success) {
         setModalMsg(res.message);
         return;
       }
     } else {
-      const res = addIncomeCategory({ name: nameInput, owner: ownerInput });
+      const res = await addIncomeCategory({ name: nameInput, owner: ownerInput });
       if (!res.success) {
         setModalMsg(res.message);
         return;
@@ -90,9 +91,9 @@ export default function IncomeView() {
     setIsModalOpen(false);
   };
 
-  const handleDeleteModal = (id) => {
+  const handleDeleteModal = async (id) => {
     if (!window.confirm('정말 이 수입 항목을 삭제하시겠습니까?')) return;
-    const res = deleteIncomeCategory(id);
+    const res = await deleteIncomeCategory(id);
     if (!res.success) {
       setModalMsg(res.message);
       return;
@@ -117,6 +118,7 @@ export default function IncomeView() {
         <button
           className="btn btn-primary"
           onClick={handleOpenAddModal}
+          disabled={isIncomeSaving}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
           <Plus size={16} /> 수입 항목 추가/관리
@@ -362,6 +364,7 @@ export default function IncomeView() {
                     type="button"
                     className="btn btn-danger"
                     onClick={() => handleDeleteModal(editingCategory.id)}
+                    disabled={isIncomeSaving}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                   >
                     <Trash2 size={16} /> 삭제
