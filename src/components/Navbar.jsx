@@ -21,14 +21,22 @@ export default function Navbar({ activeTab, setActiveTab }) {
   const [currentYear, currentMonthNum] = (selectedMonth || defaultYM).split('-');
   const yearInt = parseInt(currentYear) || now.getFullYear();
 
-  const handlePrevYear = () => {
-    const nextYear = String(yearInt - 1);
-    setSelectedMonth(`${nextYear}-${currentMonthNum}`);
-  };
+  const availableYears = new Set(Array.from({ length: 11 }, (_, i) => now.getFullYear() - 5 + i));
+  availableYears.add(yearInt);
+  (db?.transactions || []).forEach(tx => {
+    const year = Number(tx.date?.slice(0, 4));
+    if (Number.isInteger(year) && year > 0) availableYears.add(year);
+  });
+  Object.keys(db?.monthlyAssetSnapshots || {}).forEach(month => {
+    const year = Number(month.slice(0, 4));
+    if (Number.isInteger(year) && year > 0) availableYears.add(year);
+  });
 
-  const handleNextYear = () => {
-    const nextYear = String(yearInt + 1);
-    setSelectedMonth(`${nextYear}-${currentMonthNum}`);
+  const handleMonthStep = (step) => {
+    const monthIndex = Number(currentMonthNum) - 1 + step;
+    const nextYear = yearInt + Math.floor(monthIndex / 12);
+    const nextMonth = ((monthIndex % 12 + 12) % 12) + 1;
+    setSelectedMonth(`${nextYear}-${String(nextMonth).padStart(2, '0')}`);
   };
 
   const handleMonthChange = (mStr) => {
@@ -51,31 +59,33 @@ export default function Navbar({ activeTab, setActiveTab }) {
           </div>
         </div>
 
-        {/* 다년도 피벗 연도/월 컨트롤 */}
+        {/* 월 단위 이동 및 연도/월 직접 선택 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(30, 41, 59, 0.7)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
           <Calendar size={18} color="var(--accent-cyan)" />
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '2px', background: 'rgba(15, 23, 42, 0.6)', padding: '2px 6px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
             <button
-              onClick={handlePrevYear}
+              type="button"
+              onClick={() => handleMonthStep(-1)}
               style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '0.8rem', display: 'flex', alignItems: 'center' }}
-              title="이전 연도로 이동"
+              title="이전 달로 이동"
+              aria-label="이전 달로 이동"
             >
               <ChevronLeft size={16} />
             </button>
-            <span style={{ fontSize: '0.9rem', fontWeight: '700', color: '#fff', padding: '0 4px', minWidth: '55px', textAlign: 'center' }}>
-              {currentYear}년
-            </span>
-            <button
-              onClick={handleNextYear}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', fontSize: '0.8rem', display: 'flex', alignItems: 'center' }}
-              title="다음 연도로 이동"
+            <select
+              aria-label="조회 연도 선택"
+              value={yearInt}
+              onChange={(e) => setSelectedMonth(`${e.target.value}-${currentMonthNum}`)}
+              style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '0.9rem', fontWeight: '700', cursor: 'pointer' }}
             >
-              <ChevronRight size={16} />
-            </button>
-          </div>
+              {[...availableYears].sort((a, b) => a - b).map(year => (
+                <option key={year} value={year} style={{ background: '#1e293b', color: '#fff' }}>{year}년</option>
+              ))}
+            </select>
 
           <select
+            aria-label="조회 월 선택"
             value={currentMonthNum}
             onChange={(e) => handleMonthChange(e.target.value)}
             style={{ background: 'transparent', border: 'none', color: 'var(--accent-cyan)', fontWeight: '700', fontSize: '0.95rem', cursor: 'pointer', outline: 'none' }}
@@ -89,6 +99,16 @@ export default function Navbar({ activeTab, setActiveTab }) {
               );
             })}
           </select>
+            <button
+              type="button"
+              onClick={() => handleMonthStep(1)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px', display: 'flex', alignItems: 'center' }}
+              title="다음 달로 이동"
+              aria-label="다음 달로 이동"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
 
         {/* 네비게이션 탭 & 사용자 프로필 */}
