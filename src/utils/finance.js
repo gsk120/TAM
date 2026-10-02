@@ -305,6 +305,9 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
     .filter(isOneOffCat)
     .reduce((acc, c) => acc + c.spent, 0);
 
+  // 실수입은 실비 환급을 제외하되 총수입과 현금흐름 계산은 유지
+  const netIncome = totalIncome - medicalRefund;
+
   // 월 잉여자금 = 총수입 - 총지출
   const monthlySurplus = totalIncome - totalExpense;
 
@@ -315,6 +318,7 @@ export function calculateMonthlyMetrics(transactions, yearMonth, categoryBudgets
   return {
     yearMonth,
     totalIncome,
+    netIncome,
     totalExpense,
     categoryTotalSpent,
     totalCashOutflow,
