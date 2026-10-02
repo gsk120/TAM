@@ -608,6 +608,7 @@ export function AppProvider({ children }) {
         month: `${parseInt(mStr.split('-')[1])}월`,
         yearMonth: mStr,
         totalIncome: mMetrics.totalIncome,
+        netIncome: mMetrics.netIncome,
         totalExpense: mMetrics.totalExpense,
         categoryTotalSpent: mMetrics.categoryTotalSpent,
         totalCashOutflow: mMetrics.totalCashOutflow,

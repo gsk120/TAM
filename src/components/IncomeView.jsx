@@ -31,6 +31,15 @@ export default function IncomeView() {
     ? db.incomeCategories
     : [];
 
+  const annualNetIncome = yearlyMetrics.reduce((sum, month) => sum + month.netIncome, 0);
+  const annualTotalIncome = yearlyMetrics.reduce((sum, month) => sum + month.totalIncome, 0);
+  const annualIncomeMap = yearlyMetrics.reduce((totals, month) => {
+    Object.entries(month.incomeMap || {}).forEach(([key, amount]) => {
+      totals[key] = (totals[key] || 0) + amount;
+    });
+    return totals;
+  }, {});
+
   const BENCHMARK_INCOME = 10000000;
   const diffFromBenchmark = currentMetrics.totalIncome - BENCHMARK_INCOME;
 
@@ -207,7 +216,8 @@ export default function IncomeView() {
                   {currentMembers.map(mem => (
                     <th key={mem.id}>{mem.name} 수입 합계 💡</th>
                   ))}
-                  <th>총 수입</th>
+                  <th>실수입<div style={{ fontSize: '0.7rem', fontWeight: '400', color: 'var(--text-muted)' }}>가구 전체 기준</div></th>
+                  <th>총수입<div style={{ fontSize: '0.7rem', fontWeight: '400', color: 'var(--text-muted)' }}>가구 전체 기준</div></th>
                 </tr>
               )}
 
@@ -216,7 +226,8 @@ export default function IncomeView() {
                   <th>월</th>
                   {activeIncomeCategories.filter(c => (c.owner || '가족공동') === selectedMember.name).map(c => <th key={c.id}>{c.name}</th>)}
                   <th>{selectedMember.name} 수입 합계</th>
-                  <th>총 수입</th>
+                  <th>실수입<div style={{ fontSize: '0.7rem', fontWeight: '400', color: 'var(--text-muted)' }}>가구 전체 기준</div></th>
+                  <th>총수입<div style={{ fontSize: '0.7rem', fontWeight: '400', color: 'var(--text-muted)' }}>가구 전체 기준</div></th>
                 </tr>
               )}
 
@@ -224,7 +235,8 @@ export default function IncomeView() {
                 <tr>
                   <th>월</th>
                   {activeIncomeCategories.map(c => <th key={c.id}>{c.name} ({c.owner || '공동'})</th>)}
-                  <th>총 수입</th>
+                  <th>실수입<div style={{ fontSize: '0.7rem', fontWeight: '400', color: 'var(--text-muted)' }}>가구 전체 기준</div></th>
+                  <th>총수입<div style={{ fontSize: '0.7rem', fontWeight: '400', color: 'var(--text-muted)' }}>가구 전체 기준</div></th>
                 </tr>
               )}
             </thead>
@@ -252,7 +264,6 @@ export default function IncomeView() {
                             </td>
                           );
                         })}
-                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                       </>
                     )}
 
@@ -263,7 +274,6 @@ export default function IncomeView() {
                           <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
                         ))}
                         <td style={{ fontWeight: '600', color: '#fff' }}>{formatKRW(getOwnerIncomeTotal(iMap, selectedMember.name))}</td>
-                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                       </>
                     )}
 
@@ -273,13 +283,35 @@ export default function IncomeView() {
                         {activeIncomeCategories.map(c => (
                           <td key={c.id}>{formatKRW(iMap[c.name] || iMap[c.id] || 0)}</td>
                         ))}
-                        <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                       </>
                     )}
+                    <td style={{ fontWeight: '700', color: 'var(--accent-cyan)' }}>{formatKRW(m.netIncome)}</td>
+                    <td style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                   </tr>
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: '700', background: 'rgba(59, 130, 246, 0.08)' }}>
+                <th scope="row">연간 합계</th>
+                {viewTab === 'compact' && currentMembers.map(mem => (
+                  <td key={mem.id}>{formatKRW(getOwnerIncomeTotal(annualIncomeMap, mem.name))}</td>
+                ))}
+                {selectedMember && (
+                  <>
+                    {activeIncomeCategories.filter(c => (c.owner || '가족공동') === selectedMember.name).map(c => (
+                      <td key={c.id}>{formatKRW(annualIncomeMap[c.name] || annualIncomeMap[c.id] || 0)}</td>
+                    ))}
+                    <td>{formatKRW(getOwnerIncomeTotal(annualIncomeMap, selectedMember.name))}</td>
+                  </>
+                )}
+                {viewTab === 'all' && activeIncomeCategories.map(c => (
+                  <td key={c.id}>{formatKRW(annualIncomeMap[c.name] || annualIncomeMap[c.id] || 0)}</td>
+                ))}
+                <td style={{ color: 'var(--accent-cyan)' }}>{formatKRW(annualNetIncome)}</td>
+                <td style={{ color: 'var(--accent-emerald)' }}>{formatKRW(annualTotalIncome)}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>

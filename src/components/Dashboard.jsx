@@ -6,6 +6,14 @@ import { TrendingUp, AlertTriangle, DollarSign, HeartPulse, PiggyBank, CreditCar
 export default function Dashboard() {
   const { currentMetrics, yearlyMetrics, selectedMonth } = useApp();
 
+  const annualTotals = yearlyMetrics.reduce((totals, month) => ({
+    totalIncome: totals.totalIncome + month.totalIncome,
+    totalExpense: totals.totalExpense + month.totalExpense,
+    netIncome: totals.netIncome + month.netIncome,
+    categoryTotalSpent: totals.categoryTotalSpent + month.categoryTotalSpent,
+    monthlySurplus: totals.monthlySurplus + month.monthlySurplus,
+  }), { totalIncome: 0, totalExpense: 0, netIncome: 0, categoryTotalSpent: 0, monthlySurplus: 0 });
+
   const totalBudget = currentMetrics.categoryDetails.reduce((acc, curr) => acc + curr.budget, 0);
   const totalSpent = currentMetrics.categoryDetails.reduce((acc, curr) => acc + curr.spent, 0);
 
@@ -70,21 +78,24 @@ export default function Dashboard() {
 
       {/* 8개 주요 KPI 카드 Max 4컬럼 제한 반응형 Media Query Grid */}
       <div className="kpi-grid-container">
-        {/* 1번 카드: 당월 총수입 */}
+        {/* 1번 카드: 당월 실수입 */}
         <div className="glass-card" style={{ padding: '20px' }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>당월 총수입</span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '500' }}>당월 실수입</span>
               <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <TrendingUp size={20} color="var(--accent-emerald)" />
               </div>
             </div>
             <div style={{ fontSize: '1.6rem', fontWeight: '700', color: 'var(--accent-emerald)' }}>
-              {formatKRW(currentMetrics.totalIncome)}
+              {formatKRW(currentMetrics.netIncome)}
             </div>
           </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px' }}>
-            월급, 상여, 실비환급, 기타수입 포함
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: 'auto', paddingTop: '6px', wordBreak: 'keep-all', overflowWrap: 'anywhere' }}>
+            <div style={{ marginBottom: '4px' }}>
+              실비 포함 총수입 {formatKRW(currentMetrics.totalIncome)} · 실비 환급 {formatKRW(currentMetrics.medicalRefund)}
+            </div>
+            월급, 상여, 기타수입 포함 · 실비 환급 제외
           </div>
         </div>
 
@@ -370,6 +381,7 @@ export default function Dashboard() {
                 <th>조회월</th>
                 <th>총 수입</th>
                 <th>총 지출</th>
+                <th>실수입(실비차감)</th>
                 <th>실 지출(실비 차감)</th>
                 <th>월 잉여자금</th>
                 <th>상태</th>
@@ -383,6 +395,7 @@ export default function Dashboard() {
                     <td>{m.month} {isSelected && '👈'}</td>
                     <td style={{ color: 'var(--accent-emerald)' }}>{formatKRW(m.totalIncome)}</td>
                     <td style={{ color: '#fff' }}>{formatKRW(m.totalExpense)}</td>
+                    <td style={{ color: 'var(--accent-emerald)' }}>{formatKRW(m.netIncome)}</td>
                     <td style={{ color: 'var(--accent-cyan)' }}>{formatKRW(m.categoryTotalSpent)}</td>
                     <td style={{ color: m.monthlySurplus >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
                       {formatKRW(m.monthlySurplus)}
@@ -398,6 +411,25 @@ export default function Dashboard() {
                 );
               })}
             </tbody>
+            <tfoot>
+              <tr style={{ fontWeight: '700', background: 'rgba(59, 130, 246, 0.08)' }}>
+                <th scope="row">연간 합계</th>
+                <td style={{ color: 'var(--accent-emerald)' }}>{formatKRW(annualTotals.totalIncome)}</td>
+                <td style={{ color: '#fff' }}>{formatKRW(annualTotals.totalExpense)}</td>
+                <td style={{ color: 'var(--accent-emerald)' }}>{formatKRW(annualTotals.netIncome)}</td>
+                <td style={{ color: 'var(--accent-cyan)' }}>{formatKRW(annualTotals.categoryTotalSpent)}</td>
+                <td style={{ color: annualTotals.monthlySurplus >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                  {formatKRW(annualTotals.monthlySurplus)}
+                </td>
+                <td>
+                  {annualTotals.monthlySurplus >= 0 ? (
+                    <span className="badge badge-stable">흑자</span>
+                  ) : (
+                    <span className="badge badge-danger">적자</span>
+                  )}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
