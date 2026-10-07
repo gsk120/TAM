@@ -1,0 +1,20 @@
+import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import {parseExcelOrCsvFile,detectDuplicates} from "file:///C:/Users/gsk12/OneDrive/바탕 화면/자산관리프로그램/src/utils/excelParser.js";
+import {calculateMonthlyMetrics} from "file:///C:/Users/gsk12/OneDrive/바탕 화면/자산관리프로그램/src/utils/finance.js";
+const dir="C:/Users/gsk12/OneDrive/바탕 화면/자산관리프로그램/outputs/demo-2026-04-09";
+globalThis.FileReader=class {readAsArrayBuffer(file){Promise.resolve().then(()=>this.onload({target:{result:file.bytes.buffer.slice(file.bytes.byteOffset,file.bytes.byteOffset+file.bytes.byteLength)}})).catch(e=>this.onerror(e));}};
+const db=JSON.parse(await fs.readFile(dir+'/demo_2026_04-08_등록용.json','utf8'));
+const seen=new Set();for(const t of db.transactions){assert(!seen.has(t.id));seen.add(t.id);assert(t.date>='2026-04-01'&&t.date<='2026-08-31');assert(Number.isSafeInteger(t.amount));assert(['남편','아내','가족공동'].includes(t.owner));assert(t.description);assert(!t.user_id);}
+assert.equal(db.transactions.length,528);assert.equal(Object.keys(db.monthlyAssetSnapshots).length,5);assert.equal(Object.values(db.monthlyBudgets['2026-09']).reduce((s,v)=>s+v,0),6000000);
+let september=[];
+for(const owner of ['남편','아내']){const filename='demo_2026_09_'+owner+'_거래내역.xlsx';const parsed=(await parseExcelOrCsvFile({name:filename,bytes:await fs.readFile(dir+'/'+filename)})).map(t=>({...t,owner}));assert.equal(parsed.length,owner==='남편'?53:49);assert(parsed.every(t=>t.date>='2026-09-01'&&t.date<='2026-09-30'));assert(parsed.filter(t=>t.type==='지출'&&!t.isCancel).every(t=>t.amount>0));assert.equal(parsed.filter(t=>t.isCancel).length,owner==='아내'?1:0);assert(detectDuplicates(parsed,[...db.transactions,...september]).every(t=>t.duplicateStatus==='NONE'));assert(detectDuplicates(parsed,parsed).every(t=>t.duplicateStatus==='EXACT'&&!t.selected));september.push(...parsed);}
+const metrics=calculateMonthlyMetrics([...db.transactions,...september],'2026-09',db.monthlyBudgets['2026-09'],db.categories,db.incomeCategories);
+assert.equal(metrics.totalIncome,10000000);assert.equal(metrics.totalExpense,6050000);assert.equal(metrics.totalCashOutflow,6050000);assert.equal(metrics.assetIncrease,0);assert.equal(metrics.categoryTotalSpent,6050000);assert.equal(september.filter(t=>t.type==='계좌이체'&&['저축','투자'].includes(t.category)).reduce((s,t)=>s+t.amount,0),4000000);
+const source=await fs.readFile("C:/Users/gsk12/OneDrive/바탕 화면/자산관리프로그램/server/index.js",'utf8');const start=source.indexOf('function isValidBackupPayload');const end=source.indexOf('async function replaceUserDatabase',start);const validate=new Function(source.slice(start,end)+'; return isValidBackupPayload;')();assert(validate(db));
+const normalized=(t)=>({id:t.id,date:t.date,amount:t.amount,category:t.category,category_id:t.category_id,subcategory:t.subcategory,type:t.type,description:t.description,memo:t.memo,account:t.account,payment_method:t.payment_method,asset_type:t.asset_type,owner:t.owner,created_at:t.created_at});
+assert(db.transactions.every(t=>Object.keys(normalized(t)).every(k=>t[k]!==undefined)));
+const assets=s=>Object.values(s.cash).reduce((a,b)=>a+b,0)+Object.values(s.invest).reduce((a,b)=>a+b,0);const vals=[150000,-200000,350000,-100000,250000];
+for(let m=5;m<=8;m++){const ym='2026-0'+m,prev='2026-0'+(m-1);const tx=db.transactions.filter(t=>t.date.startsWith(ym));const flow=tx.filter(t=>t.type==='수입').reduce((s,t)=>s+t.amount,0)-tx.filter(t=>t.type==='지출').reduce((s,t)=>s+t.amount,0);assert.equal(assets(db.monthlyAssetSnapshots[ym])-assets(db.monthlyAssetSnapshots[prev]),flow+vals[m-4]);}
+assert.equal(840000000-assets(db.monthlyAssetSnapshots['2026-08']),10000000-6050000+180000);
+console.log(JSON.stringify({backupSchema:'valid',jsonTransactions:db.transactions.length,septemberTransactions:september.length,septemberIncome:metrics.totalIncome,septemberExpense:metrics.totalExpense,cancellations:september.filter(t=>t.isCancel).length,firstUpload:'all new',reupload:'all exact duplicates',assetReconciliation:'valid'},null,2));

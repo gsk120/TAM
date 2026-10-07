@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import Navbar from './components/Navbar';
 import Dashboard from './components/Dashboard';
@@ -10,8 +10,15 @@ import SettingsView from './components/SettingsView';
 import AuthView from './components/AuthView';
 
 function MainApp() {
-  const { isAuthenticated, login, register } = useApp();
+  const { isAuthenticated, user, db, login, register } = useApp();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const householdName = user?.householdName || db?.userInfo?.householdName;
+
+  useEffect(() => {
+    document.title = isAuthenticated && householdName?.trim()
+      ? householdName.trim()
+      : '가족 가계부 및 자산관리';
+  }, [isAuthenticated, householdName]);
 
   if (!isAuthenticated) {
     return <AuthView onLogin={login} onRegister={register} />;
