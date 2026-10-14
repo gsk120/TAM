@@ -4,7 +4,7 @@ import { parseExcelOrCsvFile, detectDuplicates } from '../utils/excelParser';
 import { formatKRW } from '../utils/finance';
 import { X, UploadCloud, AlertCircle, CheckCircle2, ShieldAlert, ShieldCheck } from 'lucide-react';
 
-export default function ImportModal({ onClose }) {
+export default function ImportModal({ onClose, targetMonth }) {
   const { db, batchImportTransactions, familyMembers } = useApp();
 
   const [selectedOwner, setSelectedOwner] = useState(() => (familyMembers && familyMembers.length > 0 ? familyMembers[0].name : '가족공동'));
@@ -30,9 +30,9 @@ export default function ImportModal({ onClose }) {
     setErrorMsg(null);
 
     try {
-      const parsedTxs = await parseExcelOrCsvFile(file);
+      const parsedTxs = await parseExcelOrCsvFile(file, targetMonth);
       if (!parsedTxs || parsedTxs.length === 0) {
-        setErrorMsg('파일에서 유효한 거래 내역을 찾을 수 없습니다. 열 구성을 확인하세요.');
+        setErrorMsg(`${targetMonth}에 해당하는 거래 내역이 없습니다.`);
         setIsLoading(false);
         return;
       }
@@ -44,7 +44,7 @@ export default function ImportModal({ onClose }) {
       }));
 
       // 중복 탐지 실행
-      const evaluated = detectDuplicates(txsWithOwner, db.transactions);
+      const evaluated = detectDuplicates(txsWithOwner, db.transactions.filter(tx => tx.date.slice(0, 7) === targetMonth));
       setCandidates(evaluated);
     } catch (err) {
       console.error('File parse error:', err);
@@ -76,7 +76,7 @@ export default function ImportModal({ onClose }) {
       setErrorMsg(res.message || '거래 내역 저장에 실패했습니다.');
       return;
     }
-    alert(`${selectedTxs.length}건의 거래 내역을 가계부에 등록했습니다! (월별 자동 분류됨)`);
+    alert(`${selectedTxs.length}건의 거래 내역을 가계부에 등록했습니다! (${targetMonth})`);
     onClose();
   };
 
@@ -91,7 +91,7 @@ export default function ImportModal({ onClose }) {
               📥 뱅크샐러드 / 엑셀 거래 가져오기 및 중복 검증
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              여러 달(Month)의 거래가 섞여 있어도 일자별로 자동 저장되며 중복 거래는 사전에 차단합니다.
+              등록 대상: {targetMonth} · 원본 엑셀에서 해당 월 거래만 가져오고 중복을 확인합니다.
             </p>
           </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
@@ -145,7 +145,7 @@ export default function ImportModal({ onClose }) {
               뱅크샐러드 또는 가계부 엑셀/CSV 파일 선택
             </h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              선택된 소유자 [<strong style={{ color: 'var(--accent-cyan)' }}>{selectedOwner}</strong>] 소유로 엑셀 내 모든 거래가 일괄 등록됩니다.
+              선택된 소유자 [<strong style={{ color: 'var(--accent-cyan)' }}>{selectedOwner}</strong>] 소유로 {targetMonth} 거래만 등록됩니다.
             </p>
             <input
               type="file"
@@ -168,7 +168,7 @@ export default function ImportModal({ onClose }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(30, 41, 59, 0.6)', padding: '12px 16px', borderRadius: '8px' }}>
               <span style={{ fontSize: '0.9rem', color: '#fff' }}>
-                총 분석: <strong>{candidates.length}건</strong> | 등록 대상: <strong style={{ color: 'var(--accent-emerald)' }}>{selectedCount}건</strong>
+                {targetMonth} 분석: <strong>{candidates.length}건</strong> | 등록 대상: <strong style={{ color: 'var(--accent-emerald)' }}>{selectedCount}건</strong>
               </span>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => handleSelectAll(true)}>전체 선택</button>

@@ -118,6 +118,12 @@ export const BUDGET_SCENARIOS = {
 };
 
 // 원 단위 수치를 예산 사용률 및 상태로 변환
+// 표시용 복사본만 정렬하여 저장 순서와 같은 유형 내 순서를 보존한다.
+export function sortCategoriesByCostType(categories) {
+  const priority = category => isFixedCat(category) ? 0 : isOneOffCat(category) ? 2 : 1;
+  return [...categories].sort((a, b) => priority(a) - priority(b));
+}
+
 export function getCategoryBudgetStatus(categoryName, spentAmount, budgetAmount) {
   if (categoryName === '세금' || budgetAmount === 0) {
     return {

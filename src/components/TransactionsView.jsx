@@ -4,6 +4,7 @@ import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance
 import { Plus, Upload, Search, Filter, Scissors, Trash2, Edit3, X, Check, ShieldCheck, RotateCcw, AlertTriangle } from 'lucide-react';
 import ImportModal from './ImportModal';
 import SplitModal from './SplitModal';
+import { sortTransactions } from '../utils/transactionSort';
 
 export default function TransactionsView() {
   const { db, selectedMonth, addTransaction, updateTransaction, deleteTransaction, deleteMonthTransactions, familyMembers, isSavePending } = useApp();
@@ -16,6 +17,14 @@ export default function TransactionsView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterOwner, setFilterOwner] = useState('ALL');
   const [filterInsurance, setFilterInsurance] = useState('ALL'); // ALL, CLAIMED (보험받음), UNCLAIMED (미청구/빈칸)
+
+  const [sort, setSort] = useState({ key: 'date', direction: 'asc' });
+  const handleSort = (key) => {
+    setSort(previous => ({
+      key,
+      direction: previous.key === key && previous.direction === 'asc' ? 'desc' : 'asc',
+    }));
+  };
 
   // 모달 상태
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -61,6 +70,8 @@ export default function TransactionsView() {
     }
     return true;
   });
+
+  const sortedTransactions = sortTransactions(filteredTransactions, sort.key, sort.direction);
 
   // 실시간 합계 계산 (tfoot 전용: 결제 취소건 차감/상쇄 처리)
   const filteredSummary = filteredTransactions.reduce(
@@ -212,13 +223,26 @@ export default function TransactionsView() {
           <thead>
             {/* 컬럼 헤더 */}
             <tr>
-              <th>날짜 (A)</th>
-              <th>타입 (B)</th>
-              <th>대분류 (C)</th>
-              <th>내용 / 가맹점 (D)</th>
-              <th>금액 (E)</th>
-              <th>귀속 구성원</th>
-              <th>비고 (F) / 의료비 보험</th>
+              {[
+                { key: 'date', label: '날짜 (A)' },
+                { key: 'type', label: '타입 (B)' },
+                { key: 'category', label: '대분류 (C)' },
+                { key: 'description', label: '내용 / 가맹점 (D)' },
+                { key: 'amount', label: '금액 (E)' },
+                { key: 'owner', label: '귀속 구성원' },
+                { key: 'memo', label: '비고 (F) / 의료비 보험' },
+              ].map(column => (
+                <th key={column.key} aria-sort={sort.key === column.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                  <button
+                    type="button"
+                    onClick={() => handleSort(column.key)}
+                    title={`${column.label} ${sort.key === column.key && sort.direction === 'asc' ? '내림차순' : '오름차순'} 정렬`}
+                    style={{ background: 'transparent', border: 'none', color: 'inherit', font: 'inherit', cursor: 'pointer', padding: 0, textAlign: 'inherit' }}
+                  >
+                    {column.label}{sort.key === column.key && (sort.direction === 'asc' ? ' ↑' : ' ↓')}
+                  </button>
+                </th>
+              ))}
               <th>작업</th>
             </tr>
 
@@ -299,7 +323,7 @@ export default function TransactionsView() {
                 </td>
               </tr>
             ) : (
-              filteredTransactions.map(tx => {
+              sortedTransactions.map(tx => {
                 const isExpense = tx.type === '지출';
                 const isIncome = tx.type === '수입';
                 const isCancel = tx.isCancel || (isExpense && Number(tx.amount) < 0);
@@ -525,7 +549,7 @@ export default function TransactionsView() {
       )}
 
       {/* 뱅샐/엑셀 가져오기 모달 */}
-      {isImportModalOpen && <ImportModal onClose={() => setIsImportModalOpen(false)} />}
+      {isImportModalOpen && <ImportModal key={selectedMonth} targetMonth={selectedMonth} onClose={() => setIsImportModalOpen(false)} />}
 
       {/* 혼합 거래 분할 모달 */}
       {splittingTx && <SplitModal tx={splittingTx} onClose={() => setSplittingTx(null)} />}

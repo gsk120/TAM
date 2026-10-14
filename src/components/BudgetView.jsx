@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW, formatInputNumber, parseInputNumber, isFixedCat, isOneOffCat, isVariableCat } from '../utils/finance';
+import { formatKRW, sortCategoriesByCostType, formatInputNumber, parseInputNumber, isFixedCat, isOneOffCat, isVariableCat } from '../utils/finance';
 import { Sliders, PlusCircle, Trash2, Edit3, CheckCircle, Plus, X, AlertTriangle } from 'lucide-react';
 
 export default function BudgetView() {
@@ -157,7 +157,7 @@ export default function BudgetView() {
     alert(`'${cat.name}' 카테고리가 삭제되었습니다.`);
   };
 
-  const categoriesList = db.categories || [];
+  const categoriesList = sortCategoriesByCostType(db.categories || []);
   const draftTotalBudget = Object.values(draftBudgets).reduce((a, b) => a + b, 0);
   const presetsList = db.customBudgetPresets ? Object.values(db.customBudgetPresets) : [];
 
