@@ -1,131 +1,129 @@
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx/xlsx.mjs';
 
-/**
- * Excel / CSV 파일을 파싱하여 표준 거래 배열로 변환
- */
-export async function parseExcelOrCsvFile(file) {
+/** 조회월에 속한 거래만 추출한다. */
+export function parseTransactionWorkbook(workbook, sourceName, targetMonth) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth || '')) {
+    throw new Error('가져올 연·월을 선택하세요.');
+  }
+  // 뱅샐 거래 시트를 우선하고 거래 헤더가 있는 시트를 탐색
+  const sheetNames = [...new Set(['가계부 내역', '내역', ...workbook.SheetNames])];
+  let jsonData;
+  let headerRowIdx = -1;
+  for (const name of sheetNames) {
+    if (!workbook.Sheets[name]) continue;
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, raw: true });
+    const index = rows.slice(0, 10).findIndex(row => {
+      const titles = row.map(value => String(value || '').trim());
+      return titles.some(h => /날짜|일자/.test(h)) && titles.some(h => /금액/.test(h)) && titles.some(h => /내용|가맹점|사용처/.test(h));
+    });
+    if (index !== -1) { jsonData = rows; headerRowIdx = index; break; }
+  }
+  if (!jsonData) throw new Error('날짜, 내용, 금액 열이 있는 거래 시트를 찾을 수 없습니다.');
+  const headers = jsonData[headerRowIdx].map(h => String(h || '').trim());
+  const dataRows = jsonData.slice(headerRowIdx + 1);
+
+  // 열 제목으로 거래 필드를 매핑
+  const colMap = {
+    date: headers.findIndex(h => h.includes('날짜') || h.includes('일자')),
+    type: headers.findIndex(h => h.includes('타입') || h.includes('유형')),
+    category: headers.findIndex(h => h.includes('대분류') || h.includes('카테고리')),
+    description: headers.findIndex(h => h.includes('내용') || h.includes('가맹점') || h.includes('사용처')),
+    amount: headers.findIndex(h => h.includes('금액')),
+    memo: headers.findIndex(h => h.includes('비고') || h.includes('메모') || h.includes('보험')),
+    owner: headers.findIndex(h => h.includes('소유자') || h.includes('귀속')),
+  };
+
+  // F열(인덱스 5)이 기본 비고열인 경우 처리
+  if (colMap.memo === -1 && headers.length === 6) {
+    colMap.memo = 5;
+  }
+
+  const parsedTransactions = [];
+
+  dataRows.forEach((row, idx) => {
+    if (!row || row.length === 0) return;
+
+    const dateRaw = colMap.date !== -1 ? row[colMap.date] : null;
+    const typeRaw = colMap.type !== -1 ? String(row[colMap.type] || '지출').trim() : '지출';
+    let categoryRaw = colMap.category !== -1 ? String(row[colMap.category] || '미분류').trim() : '미분류';
+    if (categoryRaw === '통신') categoryRaw = '통신비';
+    const descRaw = colMap.description !== -1 ? String(row[colMap.description] || '').trim() : '';
+    const amountRaw = colMap.amount !== -1 ? row[colMap.amount] : 0;
+    const memoRaw = colMap.memo !== -1 && row[colMap.memo] !== undefined ? String(row[colMap.memo] || '').trim() : '';
+    const ownerRaw = colMap.owner !== -1 ? String(row[colMap.owner] || '가족공동').trim() : '가족공동';
+
+    if (!dateRaw || !descRaw) return; // 필수 열 부재 시 생략
+
+    // Excel 날짜값과 CSV 날짜 문자열을 표시 형식에 의존하지 않고 정규화
+    let formattedDate;
+    if (dateRaw instanceof Date) {
+      formattedDate = `${dateRaw.getFullYear()}-${String(dateRaw.getMonth() + 1).padStart(2, '0')}-${String(dateRaw.getDate()).padStart(2, '0')}`;
+    } else if (typeof dateRaw === 'number') {
+      const parts = XLSX.SSF.parse_date_code(dateRaw, { date1904: Boolean(workbook.Workbook?.WBProps?.date1904) });
+      if (!parts) return;
+      formattedDate = `${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`;
+    } else {
+      const match = String(dateRaw).trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:$|[ T])/);
+      if (!match) return;
+      formattedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+    }
+    const [year, month, day] = formattedDate.split('-').map(Number);
+    const dateCheck = new Date(Date.UTC(year, month - 1, day));
+    if (dateCheck.getUTCFullYear() !== year || dateCheck.getUTCMonth() !== month - 1 || dateCheck.getUTCDate() !== day) return;
+    if (formattedDate.slice(0, 7) !== targetMonth) return;
+
+    // 금액 및 취소 여부 정규화
+    const rawNum = Number(String(amountRaw).replace(/,/g, '')) || 0;
+    let numAmount = Math.abs(rawNum);
+    let isCancel = false;
+
+    // 거래유형 결정
+    let type = typeRaw;
+    if (typeRaw.includes('수입')) type = '수입';
+    else if (typeRaw.includes('이체')) type = '계좌이체';
+    else if (typeRaw.includes('지출')) type = '지출';
+
+    // 지출 카테고리인 경우: 엑셀 금액 열이 양수(+1000)이거나 내역에 '취소'/'환급' 키워드가 있으면 결제 취소건(-1000) 처리
+    if (type === '지출') {
+      const isPositiveInExcel = rawNum > 0;
+      const hasCancelKeyword = descRaw.includes('취소') || descRaw.includes('환급') || memoRaw.includes('취소') || memoRaw.includes('환급');
+
+      if (isPositiveInExcel || hasCancelKeyword) {
+        isCancel = true;
+        numAmount = -Math.abs(rawNum); // 지출 차감/상쇄 (-1000)
+      } else {
+        numAmount = Math.abs(rawNum); // 일반 지출 (+1000)
+      }
+    }
+
+    parsedTransactions.push({
+      id: `import_${Date.now()}__${idx}`,
+      date: formattedDate,
+      type,
+      category: categoryRaw,
+      description: descRaw,
+      amount: numAmount,
+      isCancel,
+      memo: isCancel && !memoRaw.includes('결제취소') ? (memoRaw ? `${memoRaw} (결제취소)` : '결제취소') : memoRaw,
+      owner: ownerRaw,
+      isManual: false,
+      rawSource: sourceName,
+    });
+  });
+
+
+  return parsedTransactions;
+}
+
+export async function parseExcelOrCsvFile(file, targetMonth) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = (e) => {
       try {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-
-        // 첫 번째 시트 또는 '내역' 시트 우선 탐색
-        let sheetName = workbook.SheetNames.includes('내역') ? '내역' : workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        
-        // JSON 파싱 (헤더 자동 감지)
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
-
-        if (!jsonData || jsonData.length === 0) {
-          return resolve([]);
-        }
-
-        // 헤더 행 찾기 (날짜, 대분류, 금액 등의 열이 포함된 행)
-        let headerRowIdx = -1;
-        for (let i = 0; i < Math.min(10, jsonData.length); i++) {
-          const rowStr = jsonData[i].join(' ');
-          if (rowStr.includes('날짜') || rowStr.includes('금액') || rowStr.includes('내용')) {
-            headerRowIdx = i;
-            break;
-          }
-        }
-
-        if (headerRowIdx === -1) headerRowIdx = 0;
-
-        const headers = jsonData[headerRowIdx].map(h => String(h || '').trim());
-        const dataRows = jsonData.slice(headerRowIdx + 1);
-
-        // 컬럼 인덱스 매핑 (A:날짜, B:타입, C:대분류, D:내용, E:금액, F:비고)
-        const colMap = {
-          date: headers.findIndex(h => h.includes('날짜') || h.includes('일자')),
-          type: headers.findIndex(h => h.includes('타입') || h.includes('유형')),
-          category: headers.findIndex(h => h.includes('대분류') || h.includes('카테고리')),
-          description: headers.findIndex(h => h.includes('내용') || h.includes('가맹점') || h.includes('사용처')),
-          amount: headers.findIndex(h => h.includes('금액')),
-          memo: headers.findIndex(h => h.includes('비고') || h.includes('메모') || h.includes('보험')),
-          owner: headers.findIndex(h => h.includes('소유자') || h.includes('귀속')),
-        };
-
-        // F열(인덱스 5)이 기본 비고열인 경우 처리
-        if (colMap.memo === -1 && headers.length >= 6) {
-          colMap.memo = 5;
-        }
-
-        const parsedTransactions = [];
-
-        dataRows.forEach((row, idx) => {
-          if (!row || row.length === 0) return;
-
-          const dateRaw = colMap.date !== -1 ? row[colMap.date] : null;
-          const typeRaw = colMap.type !== -1 ? String(row[colMap.type] || '지출').trim() : '지출';
-          let categoryRaw = colMap.category !== -1 ? String(row[colMap.category] || '미분류').trim() : '미분류';
-          if (categoryRaw === '통신') categoryRaw = '통신비';
-          const descRaw = colMap.description !== -1 ? String(row[colMap.description] || '').trim() : '';
-          const amountRaw = colMap.amount !== -1 ? row[colMap.amount] : 0;
-          const memoRaw = colMap.memo !== -1 && row[colMap.memo] !== undefined ? String(row[colMap.memo] || '').trim() : '';
-          const ownerRaw = colMap.owner !== -1 ? String(row[colMap.owner] || '가족공동').trim() : '가족공동';
-
-          if (!dateRaw || !descRaw) return; // 필수 열 부재 시 생략
-
-          // 날짜 정규화 (YYYY-MM-DD)
-          let formattedDate = String(dateRaw).trim().replace(/\//g, '-').slice(0, 10);
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(formattedDate)) {
-            try {
-              const d = new Date(dateRaw);
-              if (!isNaN(d.getTime())) {
-                formattedDate = d.toISOString().slice(0, 10);
-              }
-            } catch (_) {}
-          }
-
-          // 금액 및 취소 여부 정규화
-          const rawNum = Number(String(amountRaw).replace(/,/g, '')) || 0;
-          let numAmount = Math.abs(rawNum);
-          let isCancel = false;
-
-          // 거래유형 결정
-          let type = typeRaw;
-          if (typeRaw.includes('수입')) type = '수입';
-          else if (typeRaw.includes('이체')) type = '계좌이체';
-          else if (typeRaw.includes('지출')) type = '지출';
-
-          // 지출 카테고리인 경우: 엑셀 원본 E열이 양수(+1000)이거나 내역에 '취소'/'환급' 키워드가 있으면 결제 취소건(-1000) 처리
-          if (type === '지출') {
-            const isPositiveInExcel = rawNum > 0;
-            const hasCancelKeyword = descRaw.includes('취소') || descRaw.includes('환급') || memoRaw.includes('취소') || memoRaw.includes('환급');
-
-            if (isPositiveInExcel || hasCancelKeyword) {
-              isCancel = true;
-              numAmount = -Math.abs(rawNum); // 지출 차감/상쇄 (-1000)
-            } else {
-              numAmount = Math.abs(rawNum); // 일반 지출 (+1000)
-            }
-          }
-
-          parsedTransactions.push({
-            id: `import_${Date.now()}__${idx}`,
-            date: formattedDate,
-            type,
-            category: categoryRaw,
-            description: descRaw,
-            amount: numAmount,
-            isCancel,
-            memo: isCancel && !memoRaw.includes('결제취소') ? (memoRaw ? `${memoRaw} (결제취소)` : '결제취소') : memoRaw,
-            owner: ownerRaw,
-            isManual: false,
-            rawSource: file.name,
-          });
-        });
-
-        resolve(parsedTransactions);
-      } catch (err) {
-        reject(err);
-      }
+        const workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: false });
+        resolve(parseTransactionWorkbook(workbook, file.name, targetMonth));
+      } catch (err) { reject(err); }
     };
-
     reader.onerror = (err) => reject(err);
     reader.readAsArrayBuffer(file);
   });

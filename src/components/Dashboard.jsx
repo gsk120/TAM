@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { formatKRW, isFixedCat, isOneOffCat, isVariableCat } from '../utils/finance';
+import { formatKRW, sortCategoriesByCostType, isFixedCat, isOneOffCat, isVariableCat } from '../utils/finance';
 import { TrendingUp, AlertTriangle, DollarSign, HeartPulse, PiggyBank, CreditCard, ShoppingBag, Calendar, Landmark } from 'lucide-react';
 
 export default function Dashboard() {
@@ -297,7 +297,7 @@ export default function Dashboard() {
           📊 카테고리별 예산 현황 ({currentMetrics.categoryDetails.length}개 항목)
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
-          {currentMetrics.categoryDetails.map(cat => {
+          {sortCategoriesByCostType(currentMetrics.categoryDetails).map(cat => {
             const isMedical = cat.name === '의료비';
             const isFixed = isFixedCat(cat);
             const isOneOff = isOneOffCat(cat);
