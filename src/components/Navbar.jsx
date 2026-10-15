@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import { LayoutDashboard, ReceiptText, PieChart, Wallet, Landmark, Settings, Calendar, ChevronLeft, ChevronRight, LogOut, User } from 'lucide-react';
 
-export default function Navbar({ activeTab, setActiveTab }) {
+export default function Navbar({ activeTab, setActiveTab, aiAllowed }) {
   const { selectedMonth, setSelectedMonth, user, logout, db } = useApp();
 
   const householdName = user?.householdName || db?.userInfo?.householdName || '우리 가족 가계부';
@@ -13,6 +13,7 @@ export default function Navbar({ activeTab, setActiveTab }) {
     { id: 'budget', label: '월별예산', icon: PieChart },
     { id: 'income', label: '수입관리', icon: Wallet },
     { id: 'accounts', label: '총 자산', icon: Landmark },
+    ...(aiAllowed ? [{ id: 'ai', label: 'AI 분석', icon: ReceiptText }] : []),
     { id: 'settings', label: '설정 & 백업', icon: Settings },
   ];
 
@@ -112,8 +113,8 @@ export default function Navbar({ activeTab, setActiveTab }) {
         </div>
 
         {/* 네비게이션 탭 & 사용자 프로필 */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <nav style={{ display: 'flex', gap: '6px', background: 'rgba(15,23,42,0.6)', padding: '4px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', maxWidth: '100%' }}>
+          <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxWidth: '100%', background: 'rgba(15,23,42,0.6)', padding: '4px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
             {navItems.map(item => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -130,6 +131,7 @@ export default function Navbar({ activeTab, setActiveTab }) {
                     border: 'none',
                     fontSize: '0.85rem',
                     fontWeight: isActive ? '600' : '500',
+                    whiteSpace: 'nowrap',
                     color: isActive ? '#fff' : 'var(--text-muted)',
                     background: isActive ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent',
                     boxShadow: isActive ? '0 2px 8px rgba(59, 130, 246, 0.4)' : 'none',
