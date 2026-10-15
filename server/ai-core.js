@@ -1,5 +1,5 @@
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
-import { calculateMonthlyMetrics } from '../src/utils/finance.js';
+import { calculateMonthlyMetrics } from './finance.js';
 
 export const hashCredential = value => createHash('sha256').update(value).digest('hex');
 export function problem(status, message) { return Object.assign(new Error(message), { status }); }
