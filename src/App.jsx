@@ -1,3 +1,5 @@
+import AiChatView from './components/AiChatView';
+import { aiRequest } from './utils/aiApi';
 import React, { useEffect, useState } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import Navbar from './components/Navbar';
@@ -10,8 +12,17 @@ import SettingsView from './components/SettingsView';
 import AuthView from './components/AuthView';
 
 function MainApp() {
-  const { isAuthenticated, user, db, login, register } = useApp();
+  const { isAuthenticated, user, db, login, register, token } = useApp();
   const [activeTab, setActiveTab] = useState('dashboard');
+  useEffect(()=>setActiveTab('dashboard'),[user?.id]);
+  const [aiAllowed,setAiAllowed] = useState(false);
+  useEffect(() => {
+    setAiAllowed(false);
+    if (!isAuthenticated || !token) return undefined;
+    const controller=new AbortController();
+    aiRequest(token,'capabilities',undefined,controller.signal).then(r=>setAiAllowed(r.enabled)).catch(()=>{});
+    return ()=>controller.abort();
+  },[isAuthenticated,token]);
   const householdName = user?.householdName || db?.userInfo?.householdName;
 
   useEffect(() => {
@@ -26,7 +37,7 @@ function MainApp() {
 
   return (
     <div className="app-container">
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Navbar aiAllowed={aiAllowed} activeTab={activeTab} setActiveTab={setActiveTab} />
 
       <main className="main-content">
         {activeTab === 'dashboard' && <Dashboard />}
@@ -34,7 +45,8 @@ function MainApp() {
         {activeTab === 'budget' && <BudgetView />}
         {activeTab === 'income' && <IncomeView />}
         {activeTab === 'accounts' && <AccountsView />}
-        {activeTab === 'settings' && <SettingsView />}
+        {activeTab === 'settings' && <SettingsView aiAllowed={aiAllowed} />}
+        {activeTab === 'ai' && aiAllowed && <AiChatView key={user.id} />}
       </main>
 
       <footer style={{ borderTop: '1px solid var(--border-color)', padding: '20px 24px', textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-dim)', background: 'rgba(15, 23, 42, 0.8)' }}>

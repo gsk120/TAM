@@ -562,3 +562,59 @@ async function performSync(userId, fullDb) {
     client.release();
   }
 }
+
+
+// AI records are independent from full-database replacement.
+const AI_KINDS = new Set(['conversation', 'message', 'job', 'device', 'pair']);
+let aiSchemaPromise;
+export async function ensureAiSchema() {
+  if (!aiSchemaPromise) aiSchemaPromise = (async () => {
+    const pool = await getDb();
+    await pool.query(`CREATE TABLE IF NOT EXISTS ai_records (
+      user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL,
+      id TEXT NOT NULL, data JSONB NOT NULL, PRIMARY KEY (user_id, kind, id)
+    );
+    CREATE INDEX IF NOT EXISTS ai_records_credential_idx ON ai_records(kind,id) WHERE kind IN ('device','pair');
+    CREATE INDEX IF NOT EXISTS ai_records_conversation_idx ON ai_records(user_id,kind,(data->>'conversationId'));`);
+  })().catch(error => { aiSchemaPromise = undefined; throw error; });
+  return aiSchemaPromise;
+}
+export async function aiFindCredential(kind, hash) {
+  if (!['device', 'pair'].includes(kind)) throw new Error('Invalid credential kind');
+  await ensureAiSchema();
+  const pool = await getDb();
+  const result = await pool.query('SELECT user_id, data FROM ai_records WHERE kind=$1 AND id=$2', [kind, hash]);
+  return result.rows[0] || null;
+}
+export async function aiWithUser(userId, operation) {
+  if (!userId) throw new Error('AI user_id required');
+  await ensureAiSchema();
+  const pool = await getDb(); const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['ai:' + userId]);
+    const check = kind => { if (!AI_KINDS.has(kind)) throw new Error('Invalid AI kind'); };
+    const store = {
+      async get(kind, id) {
+        check(kind);
+        const result = await client.query('SELECT data FROM ai_records WHERE user_id=$1 AND kind=$2 AND id=$3', [userId, kind, id]);
+        return result.rows[0]?.data || null;
+      },
+      async list(kind, conversationId = null) {
+        check(kind);
+        const result = await client.query(`SELECT data FROM ai_records WHERE user_id=$1 AND kind=$2 AND ($3::text IS NULL OR data->>'conversationId'=$3) ORDER BY data->>'createdAt', id`, [userId, kind, conversationId]);
+        return result.rows.map(row => row.data);
+      },
+      async put(kind, id, data) {
+        check(kind);
+        await client.query(`INSERT INTO ai_records(user_id,kind,id,data) VALUES($1,$2,$3,$4::jsonb)
+          ON CONFLICT(user_id,kind,id) DO UPDATE SET data=EXCLUDED.data`, [userId, kind, id, JSON.stringify(data)]);
+        return data;
+      },
+      async remove(kind, id) { check(kind); await client.query('DELETE FROM ai_records WHERE user_id=$1 AND kind=$2 AND id=$3', [userId, kind, id]); },
+    };
+    const result = await operation(store);
+    await client.query('COMMIT'); return result;
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}

@@ -1,3 +1,4 @@
+import { createAiRouter } from './ai-routes.js';
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -52,6 +53,8 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
+
+app.use('/api/ai', createAiRouter(authenticateToken));
 
 // Health Check
 app.get('/api/health', (req, res) => {
