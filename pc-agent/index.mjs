@@ -1,16 +1,19 @@
+import 'dotenv/config';
+import { requireWorkerSecret } from '../server/worker-auth.js';
 import { readFile, writeFile, mkdir, unlink, access, rename } from 'node:fs/promises';
 import { spawn, execFile } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { createInterface } from 'node:readline/promises';
 import { runCodex } from './codex-runner.mjs';
-import { ensureRegistration } from './registration.mjs';
+import { prepareCodexScope } from './session-scope.mjs';
 
 const command=process.argv[2]||'run';
+if(command!=='run')throw new Error('run 명령만 사용합니다. 웹 등록·pair 절차 없이 AI_WORKER_SECRET으로 인증합니다.');
+const token=requireWorkerSecret(process.env.AI_WORKER_SECRET);
 const rawUrl=process.argv[3]||process.env.AI_SERVER_URL;
-if(!rawUrl)throw new Error('사용법: node pc-agent/index.mjs pair|run|forget https://서버주소');
+if(!rawUrl)throw new Error('사용법: node pc-agent/index.mjs run https://서버주소');
 const url=new URL(rawUrl);
 if(url.protocol!=='https:' && !(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw new Error('HTTPS 서버 주소가 필요합니다.');
 if(url.username||url.password||url.search||url.hash||url.pathname!=='/')throw new Error('경로 없는 서버 기본 주소를 입력하세요.');
@@ -29,29 +32,10 @@ function credential(action,input=''){
     child.on('error',reject);child.on('close',code=>code===0?resolve(output):reject(new Error('Windows 자격 증명 처리 실패. PowerShell 실행 정책과 로그인 사용자를 확인하세요.')));child.stdin.end(input);
   });
 }
-let token='';
-async function request(action,body={},authenticated=true){
-  const res=await fetch(base+'/api/ai/pc/'+action,{method:'POST',redirect:'error',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json',...(authenticated?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(body)});
+async function request(action,body={}){
+  const res=await fetch(base+'/api/ai/pc/'+action,{method:'POST',redirect:'error',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(body)});
   const data=await res.json();if(!res.ok)throw Object.assign(new Error(data.error||'서버 요청 실패'),{status:res.status});return data;
 }
-const register=force=>ensureRegistration({
-  force,
-  readToken:()=>credential('read'),
-  saveToken:value=>credential('write',value),
-  pair:code=>request('pair',{code,name:os.hostname()},false),
-  prompt:async()=>{
-    const rl=createInterface({input:process.stdin,output:process.stdout});
-    try{return await rl.question('관리자가 발급한 연결 코드: ');}
-    finally{rl.close();}
-  },
-  notify:message=>console.log(message),
-});
-if(command==='pair'){
-  token=await register(true);
-  console.log('run 명령으로 시작할 수 있습니다. 다음부터는 run만 실행하세요.');}else if(command==='forget'){
-  await credential('delete');console.log('이 PC의 인증 정보를 삭제했습니다. 서버 설정에서도 PC 연결을 해제하세요.');
-}else if(command==='run'){
-
   const where=await new Promise(resolve=>execFile('where.exe',['codex'],{windowsHide:true},(e,out)=>resolve(e?'':out.trim())));
   let bin=process.env.AI_CODEX_EXECUTABLE||where.split(/\r?\n/).find(p=>p.endsWith('.exe'));
   let binArgs=[];
@@ -61,12 +45,11 @@ if(command==='pair'){
     if(!js)throw new Error('Codex CLI를 찾을 수 없습니다. 설치 및 PATH를 확인하세요.');
     await access(js);bin=process.execPath;binArgs=[js];
   }
-  const work=path.join(home,'analysis');await mkdir(work,{recursive:true});
+  const authHome=process.env.CODEX_HOME||path.join(os.homedir(),'.codex');
   const spool=path.join(home,'pending-result.bin');
   const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  token=await register(false);
-  let idleAt=Date.now(),failures=0;
-  console.log('AI PC 연결 프로그램 실행 중. 종료: Ctrl+C');
+  let idleAt=Date.now(),failures=0,authenticated=false;
+  console.log('AI 분석 프로세스 실행 중. AP 인증 확인 중… 종료: Ctrl+C');
   const recoverPrompt=context=>JSON.stringify({instructions:context.snapshot.rules.instructions,question:context.question,defaultQuestionMonth:context.month,snapshot:context.snapshot,previousConversation:context.history});
   while(true){
     try{
@@ -76,7 +59,8 @@ if(command==='pair'){
         catch(e){if(e.status===409){await unlink(spool);console.log('이전 실행이 만료되어 결과를 폐기했습니다. 웹에서 재시도하세요.');}else throw e;}
         continue;
       }
-      const {job,sessionId,month}=await request('claim');failures=0;
+      const {job,sessionId,month,scope,resetSession}=await request('claim');failures=0;
+      if(!authenticated){console.log('AP 인증 완료. 대기 중인 질문을 조회합니다.');authenticated=true;}
       if(!job){await sleep(Date.now()-idleAt>60000?10000:3000);continue;}
       idleAt=Date.now();console.log('분석 시작: '+job.id);
       const identity={jobId:job.id,attempt:job.attempt};
@@ -84,19 +68,21 @@ if(command==='pair'){
       const beat=async()=>{
         if(heartbeatBusy)return;heartbeatBusy=true;
         try{await request('heartbeat',identity);lastContact=Date.now();}
-        catch(e){if(e.status===409||e.status===401||Date.now()-lastContact>45000)controller.abort();}
+        catch(e){if(e.status===409||e.status===401||e.status===403||Date.now()-lastContact>45000)controller.abort();}
         finally{heartbeatBusy=false;}
       };
       const timer=setInterval(()=>void beat(),10000);
-      const run=prompt=>runCodex({command:bin,args:binArgs,cwd:work,prompt,sessionId,signal:controller.signal,onSession:async id=>{await request('session',{...identity,sessionId:id});}});
+      let execution;
+      const run=prompt=>runCodex({command:bin,args:binArgs,cwd:execution.cwd,env:execution.env,prompt,sessionId,signal:controller.signal,onSession:async id=>{await request('session',{...identity,sessionId:id});}});
       try{
-        let result,recovered=false;
+        execution=await prepareCodexScope({home,scope,authHome,credential});
+        let result,recovered=!!resetSession;
         if(sessionId){
           try{result=await run(JSON.stringify({question:job.question,defaultQuestionMonth:month}));}
           catch(e){
             if(!e.missingSession)throw e;
             const context=await request('context',identity);recovered=true;
-            result=await runCodex({command:bin,args:binArgs,cwd:work,prompt:recoverPrompt(context),signal:controller.signal,onSession:async id=>request('session',{...identity,sessionId:id})});
+            result=await runCodex({command:bin,args:binArgs,cwd:execution.cwd,env:execution.env,prompt:recoverPrompt(context),signal:controller.signal,onSession:async id=>request('session',{...identity,sessionId:id})});
           }
         }else{
           const context=await request('context',identity);
@@ -111,16 +97,11 @@ if(command==='pair'){
         // If the completed response is already spooled, do not rerun or mark failed.
         const hasResult=await access(spool).then(()=>true,()=>false);
         if(!hasResult&&!controller.signal.aborted)await request('fail',{...identity,error:e.message}).catch(()=>{});
-      }finally{clearInterval(timer);controller.abort();}
+      }finally{clearInterval(timer);controller.abort();await execution?.finish();}
     }catch(e){
       console.error(e.message);
-      if(e.status===401){
-        token=await register(true);failures=0;
-        console.log('PC 재등록 완료. 작업 대기를 재개합니다.');
-        continue;
-      }
-      if(e.status===403)throw new Error('AI 실행 권한이 없습니다. 관리자에게 서버 권한 설정을 확인하세요.');
+      if([401,403,503].includes(e.status))throw new Error('AI 분석 프로세스 인증 또는 권한을 확인하세요. AP와 프로세스의 AI_WORKER_SECRET을 동일하게 설정한 뒤 다시 실행하세요.');
       await sleep(Math.min(60000,3000*2**Math.min(failures++,5)));
     }
   }
-}else throw new Error('pair, run, forget 중 하나를 지정하세요.');
+

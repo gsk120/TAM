@@ -1,4 +1,5 @@
-import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { requireWorkerSecret, workerSecretMatches } from './worker-auth.js';
+import { randomUUID, createHash } from 'node:crypto';
 import { calculateMonthlyMetrics } from './finance.js';
 
 export const hashCredential = value => createHash('sha256').update(value).digest('hex');
@@ -47,27 +48,17 @@ export function makeSnapshot(db, at = new Date().toISOString()) {
 }
 
 export class AiService {
-  constructor({ withUser, findCredential, snapshot, allowed, clock = () => new Date().toISOString() }) {
-    Object.assign(this, { withUser, findCredential, snapshot, allowed, clock });
+  constructor({ withUser, withWorker, snapshot, allowed, workerSecret = () => process.env.AI_WORKER_SECRET, clock = () => new Date().toISOString() }) {
+    Object.assign(this, { withUser, withWorker, snapshot, allowed, workerSecret, clock });
   }
   async authorize(userId) { if (!await this.allowed(userId)) throw problem(403,'AI 기능 사용 권한이 없습니다.'); }
   async web(userId, action, input = {}) {
     await this.authorize(userId);
+    const devices=await this.withWorker(s=>s.list('process'));
     return this.withUser(userId, async s => {
       const now = this.clock();
       if (action === 'overview') {
-        const devices = (await s.list('device')).map(({id,name,lastSeen,revoked})=>({id,name,lastSeen,revoked}));
-        return { conversations: (await s.list('conversation')).reverse(), devices };
-      }
-      if (action === 'pair') {
-        for (const record of await s.list('pair')) await s.remove('pair',record.id);
-        const code = randomBytes(18).toString('hex'); const id=hashCredential(code);
-        await s.put('pair', id, {id,expiresAt:new Date(Date.parse(now)+300000).toISOString(),createdAt:now});
-        return { code, expiresIn:300 };
-      }
-      if (action === 'revoke') {
-        const device = await s.get('device',input.deviceId); if (!device) throw problem(404,'PC를 찾을 수 없습니다.');
-        await s.put('device',device.id,{...device,revoked:true}); return {success:true};
+        return {conversations:(await s.list('conversation')).reverse(),available:devices.some(d=>!d.revoked&&Date.parse(now)-Date.parse(d.lastSeen)<60000)};
       }
       if (action === 'create') {
         if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month || '')) throw problem(400,'분석 기준월을 선택하세요.');
@@ -76,11 +67,11 @@ export class AiService {
       }
       const c=await s.get('conversation',input.conversationId); if (!c) throw problem(404,'대화를 찾을 수 없습니다.');
       const latest=c.latestJobId ? await s.get('job',c.latestJobId) : null;
-      const device=latest?.deviceId ? await s.get('device',latest.deviceId) : (await s.list('device')).filter(d=>!d.revoked).at(-1);
-      if (action==='detail') return {conversation:c,messages:(await s.list('message',c.id)).sort((a,b)=>(a.sequence||0)-(b.sequence||0)),job:latest ? {...latest,connectionLost:connectionLost(latest,device,Date.parse(now))} : null};
+      const device=latest?.deviceId ? devices.find(d=>d.id===latest.deviceId) : devices.filter(d=>!d.revoked).at(-1);
+      if (action==='detail') return {available:devices.some(d=>!d.revoked&&Date.parse(now)-Date.parse(d.lastSeen)<60000),conversation:c,messages:(await s.list('message',c.id)).sort((a,b)=>(a.sequence||0)-(b.sequence||0)),job:latest ? {id:latest.id,status:latest.status,createdAt:latest.createdAt,error:latest.status==='failed'?'AI 분석을 완료하지 못했습니다. 잠시 후 다시 질문해 주세요.':undefined,connectionLost:connectionLost(latest,device,Date.parse(now))} : null};
       if (action!=='send' && action!=='retry') throw problem(400,'잘못된 동작입니다.');
       if (latest && ['queued','running'].includes(latest.status) && !connectionLost(latest,device,Date.parse(now))) throw problem(409,'답변 대기·생성 중에는 전송하거나 재시도할 수 없습니다.');
-      if (action==='retry' && (!latest || !connectionLost(latest,device,Date.parse(now)))) throw problem(409,'PC 연결 이상 시에만 재시도할 수 있습니다.');
+      if (action==='retry' && (!latest || !connectionLost(latest,device,Date.parse(now)))) throw problem(409,'AI 서비스 연결 이상 시에만 재시도할 수 있습니다.');
       const text=action==='retry' ? latest.question : String(input.text || '').trim();
       if (!text || text.length>10000) throw problem(400,'질문은 1~10,000자로 입력하세요.');
       if (latest && ['queued','running'].includes(latest.status)) await s.put('job',latest.id,{...latest,status:'failed',error:'새 요청으로 대체됨',attempt:null});
@@ -92,49 +83,49 @@ export class AiService {
       return j;
     });
   }
-  async pair(code, name) {
-    const id=hashCredential(String(code || '')); const found=await this.findCredential('pair',id);
-    if (!found) throw problem(401,'연결 코드가 올바르지 않습니다.');
-    await this.authorize(found.user_id);
-    return this.withUser(found.user_id,async s=>{
-      const p=await s.get('pair',id); const now=this.clock();
-      if (!p || Date.parse(p.expiresAt)<=Date.parse(now)) throw problem(401,'연결 코드가 만료됐거나 사용됐습니다.');
-      await s.remove('pair',id);
-      // Initial release permits one active PC. Rotating pairing revokes old credentials.
-      for (const d of await s.list('device')) await s.put('device',d.id,{...d,revoked:true});
-      const token=randomBytes(32).toString('hex');const deviceId=hashCredential(token);
-      await s.put('device',deviceId,{id:deviceId,name:String(name || '개인 PC').slice(0,80),lastSeen:now,createdAt:now,revoked:false});
-      return {token,deviceId};
-    });
-  }
-  async device(token, action, input={}) {
-    const id=hashCredential(String(token || ''));const found=await this.findCredential('device',id);
-    if (!found) throw problem(401,'PC 인증에 실패했습니다.');
-    await this.authorize(found.user_id);
-    return this.withUser(found.user_id,async s=>{
-      const d=await s.get('device',id);if (!d || d.revoked) throw problem(401,'PC 연결이 해제되었습니다.');
-      const now=this.clock();await s.put('device',id,{...d,lastSeen:now});
-      if(action==='claim') {
-        const jobs=await s.list('job');
-        // Never reissue uncertain work automatically, even after lease expiration.
-        if(jobs.some(j=>j.status==='running' && j.deviceId===id)) return {job:null};
-        const j=jobs.find(j=>j.status==='queued' && j.provider==='local_cli');if(!j)return {job:null};
-        const claimed={...j,status:'running',deviceId:id,attempt:randomUUID(),startedAt:now,heartbeatAt:now,leaseUntil:new Date(Date.parse(now)+60000).toISOString()};
-        await s.put('job',j.id,claimed);const c=await s.get('conversation',j.conversationId);
-        return {job:claimed,sessionId:c.sessionId,month:c.month};
+  async device(token,action,input={}) {
+    const expected=this.workerSecret();
+    try{requireWorkerSecret(expected);}catch{throw problem(503,'AI 분석 프로세스 인증 설정이 필요합니다.');}
+    if(!workerSecretMatches(token,expected))throw problem(401,'AI 분석 프로세스 인증에 실패했습니다. AI_WORKER_SECRET 설정을 확인하세요.');
+    const id='shared-process-v1';
+    return this.withWorker(async workers=>{
+      const now=this.clock();
+      await workers.put('process',id,{id,lastSeen:now,revoked:false});
+      if(action==='claim'){
+        const jobs=await workers.listJobs();
+        // Uncertain running work is never automatically issued again.
+        for(const {userId,job:j} of jobs.filter(({job})=>job.status==='running'&&job.deviceId===id)){
+          if(await this.allowed(userId))return {job:null};
+          await workers.forUser(userId).put('job',j.id,{...j,status:'failed',attempt:null,error:'AI 사용 권한이 해제되었습니다.'});
+        }
+        for(const {userId,job:j} of jobs){
+          if(j.status!=='queued'||!await this.allowed(userId))continue;
+          const s=workers.forUser(userId);
+          const c=await s.get('conversation',j.conversationId);
+          if(!c)continue;
+          const claimed={...j,status:'running',deviceId:id,attempt:randomUUID(),startedAt:now,heartbeatAt:now,leaseUntil:new Date(Date.parse(now)+60000).toISOString()};
+          await s.put('job',j.id,claimed);
+          return {job:claimed,sessionId:c.sessionScope==='isolated-v1'?c.sessionId:null,resetSession:!!c.sessionId&&c.sessionScope!=='isolated-v1',month:c.month,scope:{userId,conversationId:c.id}};
+        }
+        return {job:null};
       }
-      const j=await s.get('job',input.jobId);
+      const owner=await workers.findJob(input.jobId);
+      if(!owner)throw problem(409,'이 실행의 처리 권한이 만료되거나 변경되었습니다.');
+      const {userId,job:j}=owner;
+      if(action!=='fail')await this.authorize(userId);
+      const s=workers.forUser(userId);
       if(action==='complete' && j?.status==='completed' && j.deviceId===id && j.attempt===input.attempt) return {success:true};
       assertAttempt(j,id,input.attempt,Date.parse(now));
       if(action==='heartbeat') {await s.put('job',j.id,{...j,heartbeatAt:now,leaseUntil:new Date(Date.parse(now)+60000).toISOString()});return {success:true};}
       if(action==='session') {
         if(!/^[a-zA-Z0-9_-]{8,100}$/.test(input.sessionId||''))throw problem(400,'Invalid session');
         const c=await s.get('conversation',j.conversationId);
-        await s.put('conversation',c.id,{...c,sessionId:input.sessionId});return {success:true};
+        if(await workers.sessionUsed(input.sessionId,userId,c.id))throw problem(409,'다른 대화의 AI 세션은 사용할 수 없습니다.');
+        await s.put('conversation',c.id,{...c,sessionId:input.sessionId,sessionScope:'isolated-v1'});return {success:true};
       }
       if(action==='context') {
         const c=await s.get('conversation',j.conversationId);
-        const snap=makeSnapshot(await this.snapshot(found.user_id),now);
+        const snap=makeSnapshot(await this.snapshot(userId),now);
         const history=(await s.list('message',c.id)).filter(m=>m.id!==j.messageId).sort((a,b)=>(a.sequence||0)-(b.sequence||0));
         await s.put('job',j.id,{...j,metadata:snap.metadata});
         return {snapshot:snap,history,question:j.question,month:c.month};
@@ -144,9 +135,10 @@ export class AiService {
         const answer=String(input.answer||'');if(!answer.trim()||answer.length>200000)throw problem(400,'답변 크기가 올바르지 않습니다.');
         if(!/^[a-zA-Z0-9_-]{8,100}$/.test(input.sessionId||''))throw problem(400,'세션 ID가 올바르지 않습니다.');
         const c=await s.get('conversation',j.conversationId);const metadata=j.metadata||c.metadata||null;
+        if(await workers.sessionUsed(input.sessionId,userId,c.id))throw problem(409,'다른 대화의 AI 세션은 사용할 수 없습니다.');
         if(input.recovered){const mid=randomUUID();await s.put('message',mid,{id:mid,conversationId:c.id,role:'system',content:'AI 세션을 다시 연결했으며, 최신 가계부 데이터로 갱신했습니다',createdAt:now,sequence:(c.messageSequence||0)+1});}
         const mid=randomUUID();await s.put('message',mid,{id:mid,conversationId:c.id,role:'assistant',content:answer,metadata,sequence:(c.messageSequence||0)+(input.recovered?2:1),createdAt:new Date(Date.parse(now)+1).toISOString()});
-        await s.put('conversation',c.id,{...c,sessionId:input.sessionId,metadata,messageSequence:(c.messageSequence||0)+(input.recovered?2:1),updatedAt:now});
+        await s.put('conversation',c.id,{...c,sessionId:input.sessionId,sessionScope:'isolated-v1',metadata,messageSequence:(c.messageSequence||0)+(input.recovered?2:1),updatedAt:now});
         await s.put('job',j.id,{...j,status:'completed',completedAt:now});return {success:true};
       }
       throw problem(400,'잘못된 PC 동작입니다.');
