@@ -3,13 +3,13 @@ import { spawn, execFile } from 'node:child_process';
 export class CodexFailure extends Error {
   constructor(message, missingSession=false) {super(message);this.missingSession=missingSession;}
 }
-export function runCodex({command,args=[],cwd,prompt,sessionId,signal,onSession=async()=>{},spawnProcess=spawn}) {
+export function runCodex({command,args=[],cwd,env,prompt,sessionId,signal,onSession=async()=>{},spawnProcess=spawn}) {
   return new Promise((resolve,reject)=>{
-    const flags=['exec','--json','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--sandbox','read-only','-c','approval_policy="never"'];
+    const flags=['exec','--json','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--sandbox','read-only','-c','approval_policy="never"','-c','cli_auth_credentials_store="file"'];
     if(sessionId)flags.push('resume',sessionId);
     flags.push('-');
     // No shell interpolation. The prompt travels only through stdin.
-    const child=spawnProcess(command,[...args,...flags],{cwd,windowsHide:true,stdio:['pipe','pipe','pipe']});
+    const child=spawnProcess(command,[...args,...flags],{cwd,env,windowsHide:true,stdio:['pipe','pipe','pipe']});
     const stop=()=>{
       if(process.platform==='win32'&&child.pid)execFile('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{windowsHide:true},()=>{});
       else child.kill?.();

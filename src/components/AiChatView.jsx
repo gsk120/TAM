@@ -12,7 +12,7 @@ export default function AiChatView() {
   const [month,setMonth]=useState(selectedMonth);
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  const [devices,setDevices]=useState([]);
+  const [serviceAvailable,setServiceAvailable]=useState(false);
   const layout=useRef(null);
   const historyPanel=useRef(null);
   const messages=useRef(null);
@@ -23,12 +23,12 @@ export default function AiChatView() {
   const submitLock=useRef(false);
   const composing=useRef(false);
   const loadList=async()=>{
-    const r=await aiRequest(token,'overview');setConversations(r.conversations);setDevices(r.devices);return r;
+    const r=await aiRequest(token,'overview');setConversations(r.conversations);setServiceAvailable(r.available===true);return r;
   };
   useEffect(()=>{
     const controller=new AbortController();
     aiRequest(token,'overview',undefined,controller.signal).then(r=>{
-      setConversations(r.conversations);setDevices(r.devices);setId(r.conversations[0]?.id||null);
+      setConversations(r.conversations);setServiceAvailable(r.available===true);setId(r.conversations[0]?.id||null);
     }).catch(e=>{if(e.name!=='AbortError')setError(e.message);});
     return ()=>controller.abort();
   },[token]);
@@ -39,7 +39,7 @@ export default function AiChatView() {
       try{
         const r=await aiRequest(token,'conversations/'+id,undefined,controller.signal);
         if(controller.signal.aborted)return;
-        setDetail(r);setMonth(r.conversation.month);setError('');failures=0;
+        setDetail(r);if(typeof r.available==='boolean')setServiceAvailable(r.available);setMonth(r.conversation.month);setError('');failures=0;
         if(['queued','running'].includes(r.job?.status))timer=setTimeout(refresh,Date.now()-Date.parse(r.job.createdAt)>60000?5000:2000);
       }catch(e){if(!controller.signal.aborted){setError(e.message);timer=setTimeout(refresh,Math.min(60000,2000*2**failures++));}}
     };
@@ -94,7 +94,7 @@ export default function AiChatView() {
   const job=detail?.job;
   const pending=['queued','running'].includes(job?.status);
   const blocked=busy || (!!id&&!detail) || (pending&&!job.connectionLost);
-  const connected=devices.some(d=>!d.revoked&&Date.now()-Date.parse(d.lastSeen)<60000);
+  const connected=serviceAvailable;
   const send=async(retry=false)=>{
     if(submitLock.current||blocked||(!retry&&!draft.trim()))return;
     submitLock.current=true;setBusy(true);setError('');

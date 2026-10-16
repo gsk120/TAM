@@ -20,7 +20,7 @@ function MainApp() {
     setAiAllowed(false);
     if (!isAuthenticated || !token) return undefined;
     const controller=new AbortController();
-    aiRequest(token,'capabilities',undefined,controller.signal).then(r=>setAiAllowed(r.enabled)).catch(()=>{});
+    aiRequest(token,'capabilities',undefined,controller.signal).then(r=>{setAiAllowed(r.enabled);}).catch(()=>{});
     return ()=>controller.abort();
   },[isAuthenticated,token]);
   const householdName = user?.householdName || db?.userInfo?.householdName;
@@ -45,7 +45,7 @@ function MainApp() {
         {activeTab === 'budget' && <BudgetView />}
         {activeTab === 'income' && <IncomeView />}
         {activeTab === 'accounts' && <AccountsView />}
-        {activeTab === 'settings' && <SettingsView aiAllowed={aiAllowed} />}
+        {activeTab === 'settings' && <SettingsView />}
         {activeTab === 'ai' && aiAllowed && <AiChatView key={user.id} />}
       </main>
 

@@ -1,10 +1,9 @@
-import AiDevices from './AiDevices';
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import * as XLSX from 'xlsx';
 import { Download, Upload, RotateCcw, ShieldCheck, Users, Plus, Trash2, Edit3, Check } from 'lucide-react';
 
-export default function SettingsView({ aiAllowed }) {
+export default function SettingsView() {
   const { db, handleReset, importFullDatabase, familyMembers, updateFamilyMembers, isSavePending } = useApp();
 
   const [newMemberName, setNewMemberName] = useState('');
@@ -132,7 +131,7 @@ export default function SettingsView({ aiAllowed }) {
       </div>
 
       {/* 가족 구성원 관리 카드 */}
-      {aiAllowed && <AiDevices />}
+
       <div className="glass-card" style={{ padding: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
           <Users size={24} color="var(--accent-cyan)" />

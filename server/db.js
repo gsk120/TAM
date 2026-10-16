@@ -564,57 +564,87 @@ async function performSync(userId, fullDb) {
 }
 
 
-// AI records are independent from full-database replacement.
+
+// AI storage is independent from full-database replacement.
 const AI_KINDS = new Set(['conversation', 'message', 'job', 'device', 'pair']);
 let aiSchemaPromise;
-export async function ensureAiSchema() {
-  if (!aiSchemaPromise) aiSchemaPromise = (async () => {
-    const pool = await getDb();
-    await pool.query(`CREATE TABLE IF NOT EXISTS ai_records (
-      user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL,
-      id TEXT NOT NULL, data JSONB NOT NULL, PRIMARY KEY (user_id, kind, id)
-    );
-    CREATE INDEX IF NOT EXISTS ai_records_credential_idx ON ai_records(kind,id) WHERE kind IN ('device','pair');
-    CREATE INDEX IF NOT EXISTS ai_records_conversation_idx ON ai_records(user_id,kind,(data->>'conversationId'));`);
-  })().catch(error => { aiSchemaPromise = undefined; throw error; });
-  return aiSchemaPromise;
-}
-export async function aiFindCredential(kind, hash) {
-  if (!['device', 'pair'].includes(kind)) throw new Error('Invalid credential kind');
-  await ensureAiSchema();
-  const pool = await getDb();
-  const result = await pool.query('SELECT user_id, data FROM ai_records WHERE kind=$1 AND id=$2', [kind, hash]);
-  return result.rows[0] || null;
-}
-export async function aiWithUser(userId, operation) {
-  if (!userId) throw new Error('AI user_id required');
-  await ensureAiSchema();
-  const pool = await getDb(); const client = await pool.connect();
+export async function initializeAiSchema(pool) {
+  const client=await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['ai:' + userId]);
-    const check = kind => { if (!AI_KINDS.has(kind)) throw new Error('Invalid AI kind'); };
-    const store = {
-      async get(kind, id) {
-        check(kind);
-        const result = await client.query('SELECT data FROM ai_records WHERE user_id=$1 AND kind=$2 AND id=$3', [userId, kind, id]);
-        return result.rows[0]?.data || null;
-      },
-      async list(kind, conversationId = null) {
-        check(kind);
-        const result = await client.query(`SELECT data FROM ai_records WHERE user_id=$1 AND kind=$2 AND ($3::text IS NULL OR data->>'conversationId'=$3) ORDER BY data->>'createdAt', id`, [userId, kind, conversationId]);
-        return result.rows.map(row => row.data);
-      },
-      async put(kind, id, data) {
-        check(kind);
-        await client.query(`INSERT INTO ai_records(user_id,kind,id,data) VALUES($1,$2,$3,$4::jsonb)
-          ON CONFLICT(user_id,kind,id) DO UPDATE SET data=EXCLUDED.data`, [userId, kind, id, JSON.stringify(data)]);
-        return data;
-      },
-      async remove(kind, id) { check(kind); await client.query('DELETE FROM ai_records WHERE user_id=$1 AND kind=$2 AND id=$3', [userId, kind, id]); },
-    };
-    const result = await operation(store);
-    await client.query('COMMIT'); return result;
-  } catch (error) { await client.query('ROLLBACK'); throw error; }
-  finally { client.release(); }
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', ['ai:schema']);
+    await client.query(`CREATE TABLE IF NOT EXISTS ai_records (
+      user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL,
+      id TEXT NOT NULL, data JSONB NOT NULL, PRIMARY KEY (user_id,kind,id)
+    );
+    CREATE INDEX IF NOT EXISTS ai_records_credential_idx ON ai_records(kind,id) WHERE kind IN ('device','pair');
+    CREATE INDEX IF NOT EXISTS ai_records_conversation_idx ON ai_records(user_id,kind,(data->>'conversationId'));
+    CREATE INDEX IF NOT EXISTS ai_records_jobs_idx ON ai_records(kind,(data->>'status'),(data->>'createdAt')) WHERE kind='job';
+    CREATE INDEX IF NOT EXISTS ai_records_job_id_idx ON ai_records(id) WHERE kind='job';
+    CREATE TABLE IF NOT EXISTS ai_workers (kind TEXT NOT NULL, id TEXT NOT NULL, data JSONB NOT NULL, PRIMARY KEY(kind,id));
+    CREATE TABLE IF NOT EXISTS ai_migrations (id TEXT PRIMARY KEY);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_paid BOOLEAN NOT NULL DEFAULT FALSE;
+`);
+    const marker=await client.query('INSERT INTO ai_migrations(id) VALUES($1) ON CONFLICT DO NOTHING RETURNING id', ['paid-admin-v1']);
+    if(marker.rows.length)await client.query('UPDATE users SET ai_paid=TRUE WHERE username=$1', ['togom']);
+    await client.query('COMMIT');
+  } catch(error) {await client.query('ROLLBACK');throw error;}
+  finally{client.release();}
 }
+export async function ensureAiSchema() {
+  if(!aiSchemaPromise)aiSchemaPromise=getDb().then(initializeAiSchema).catch(error=>{aiSchemaPromise=undefined;throw error;});
+  return aiSchemaPromise;
+}
+export async function aiUserAccess(userId) {
+  await ensureAiSchema();
+  const pool=await getDb();
+  const result=await pool.query('SELECT ai_paid FROM users WHERE id=$1',[userId]);
+  return {paid:result.rows[0]?.ai_paid===true};
+}
+function aiUserStore(client,userId) {
+  if(!userId)throw new Error('AI user_id required');
+  const check=kind=>{if(!AI_KINDS.has(kind))throw new Error('Invalid AI kind');};
+  return {
+    async get(kind,id) {
+      check(kind);
+      const r=await client.query('SELECT data FROM ai_records WHERE user_id=$1 AND kind=$2 AND id=$3',[userId,kind,id]);
+      return r.rows[0]?.data||null;
+    },
+    async list(kind,conversationId=null) {
+      check(kind);
+      const r=await client.query(`SELECT data FROM ai_records WHERE user_id=$1 AND kind=$2 AND ($3::text IS NULL OR data->>'conversationId'=$3) ORDER BY data->>'createdAt',id`,[userId,kind,conversationId]);
+      return r.rows.map(row=>row.data);
+    },
+    async put(kind,id,data) {
+      check(kind);
+      await client.query(`INSERT INTO ai_records(user_id,kind,id,data) VALUES($1,$2,$3,$4::jsonb)
+        ON CONFLICT(user_id,kind,id) DO UPDATE SET data=EXCLUDED.data`,[userId,kind,id,JSON.stringify(data)]);
+      return data;
+    },
+    async remove(kind,id) {check(kind);await client.query('DELETE FROM ai_records WHERE user_id=$1 AND kind=$2 AND id=$3',[userId,kind,id]);},
+  };
+}
+async function aiTransaction(operation) {
+  await ensureAiSchema();
+  const client=await (await getDb()).connect();
+  try{
+    await client.query('BEGIN');
+    // Shared by web writes and worker assignment across all AP instances.
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['ai:shared-workers']);
+    const result=await operation(client);
+    await client.query('COMMIT');return result;
+  }catch(error){await client.query('ROLLBACK');throw error;}
+  finally{client.release();}
+}
+export const aiWithUser=(userId,operation)=>aiTransaction(client=>operation(aiUserStore(client,userId)));
+export const aiWithWorker=operation=>aiTransaction(client=>operation({
+  async get(kind,id){const r=await client.query('SELECT data FROM ai_workers WHERE kind=$1 AND id=$2',[kind,id]);return r.rows[0]?.data||null;},
+  async list(kind){const r=await client.query("SELECT data FROM ai_workers WHERE kind=$1 ORDER BY data->>'createdAt',id",[kind]);return r.rows.map(row=>row.data);},
+  async put(kind,id,data){await client.query('INSERT INTO ai_workers(kind,id,data) VALUES($1,$2,$3::jsonb) ON CONFLICT(kind,id) DO UPDATE SET data=EXCLUDED.data',[kind,id,JSON.stringify(data)]);},
+  async remove(kind,id){await client.query('DELETE FROM ai_workers WHERE kind=$1 AND id=$2',[kind,id]);},
+  // Only the authenticated worker path can resolve owners across accounts.
+  async listJobs(){const r=await client.query(`SELECT user_id,data FROM ai_records WHERE kind=$1 AND data->>'status'=ANY($2::text[]) AND data->>'provider'=$3 ORDER BY data->>'createdAt',id`,['job',['queued','running'],'local_cli']);return r.rows.map(row=>({userId:row.user_id,job:row.data}));},
+  async findJob(id){const r=await client.query('SELECT user_id,data FROM ai_records WHERE kind=$1 AND id=$2',['job',id]);return r.rows[0]?{userId:r.rows[0].user_id,job:r.rows[0].data}:null;},
+  async sessionUsed(sessionId,userId,conversationId){const r=await client.query(`SELECT 1 FROM ai_records WHERE kind=$1 AND data->>'sessionId'=$2 AND NOT(user_id=$3 AND id=$4) LIMIT 1`,['conversation',sessionId,userId,conversationId]);return r.rows.length>0;},
+  forUser:userId=>aiUserStore(client,userId),
+}));
