@@ -44,7 +44,7 @@ npm run check      # lint + test + build (same as CI)
 
 ## Deployment
 
-The GitHub Actions deployment workflow is deliberately disabled until `DEPLOY_ENABLED=true` is set as a repository variable. See [docs/deployment.md](docs/deployment.md) for the one-time GitHub and GCP configuration.
+The GitHub Actions deployment workflow is deliberately disabled until `DEPLOY_ENABLED=true` is set as a repository variable. See [docs/guides/deployment.md](docs/guides/deployment.md) for the one-time GitHub and GCP configuration.
 
 ## Repository map
 
