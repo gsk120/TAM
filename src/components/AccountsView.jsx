@@ -232,7 +232,6 @@ export default function AccountsView() {
         </button>
       </div>
 
-      <AssetImportInfo month={selectedMonth} snapshot={snap} editingSnapshot={editingSnapshot} />
       {/* 상단 4대 핵심 자산 요약 KPI 카드 */}
       <div className="grid-cards">
         {/* 총자산 */}
@@ -1160,6 +1159,8 @@ export default function AccountsView() {
           })()}
         </div>
       </div>
+
+      <AssetImportInfo month={selectedMonth} snapshot={snap} />
 
       {/* 당월 자산 데이터 초기화 확인 모달 */}
       {showClearModal && (

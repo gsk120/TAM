@@ -14,6 +14,22 @@
 .asset-import-review summary { cursor: pointer; padding-block: 8px; }
 .asset-import-result { padding: 12px; border: 1px solid var(--border); border-radius: 8px; white-space: pre-line; }
 .asset-import-modal { max-width: 950px; width: min(95vw, 950px); max-height: 90vh; overflow-y: auto; }
+.asset-import-info-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.asset-import-info-heading p { margin: 6px 0; color: var(--text-muted); font-size: .85rem; }
+.asset-import-member-stamps { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--text-muted); }
+.asset-import-modal.import-mappings-dialog { max-width: 1060px; }
+.import-mappings-scroll { overflow: auto; min-height: 0; overscroll-behavior: contain; }
+.import-mappings-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .85rem; }
+.import-mappings-table th { position: sticky; top: 0; z-index: 1; background: #101a2b; color: #b8c7dc; text-align: left; white-space: nowrap; }
+.import-mappings-table th, .import-mappings-table td { padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.import-mappings-table td { overflow-wrap: anywhere; max-width: 320px; vertical-align: middle; }
+.import-mappings-table td small { display: block; margin-top: 6px; color: var(--text-muted); font-size: .72rem; }
+.import-mappings-table tbody tr:hover { background: #60a5fa08; }
+.import-mapping-excluded { background: #94a3b805; color: var(--text-muted); }
+.import-mapping-choice { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.import-mapping-error { color: #fca5a5; font-size: .8rem; margin: 5px 0 0; overflow-wrap: anywhere; }
+.import-mappings-dialog .import-dialog-footer > div { min-width: 0; flex: 1; }
+.import-mappings-dialog .import-close:disabled { opacity: .4; cursor: not-allowed; }
 
 /* The import dialog owns its scrolling; the title, tabs and action stay visible. */
 .asset-import-modal.import-dialog {
