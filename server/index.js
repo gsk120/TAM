@@ -1,4 +1,5 @@
 import { createAiRouter } from './ai-routes.js';
+import { createAssetImportRouter } from './asset-import-routes.js';
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -6,7 +7,7 @@ import path from 'path';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
-import { getDb, getFullDatabase, syncFullDatabase, getIsPostgres, getDbEngineName, findUserByUsername, createUser, getUserById } from './db.js';
+import { getDb, getFullDatabase, syncFullDatabase, getIsPostgres, getDbEngineName, findUserByUsername, createUser, getUserById, saveAssetStructureData, saveManualAssetSnapshot, removeAssetData, lockAssetAccount } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +56,7 @@ function authenticateToken(req, res, next) {
 }
 
 app.use('/api/ai', createAiRouter(authenticateToken));
+app.use('/api/assets', createAssetImportRouter(authenticateToken));
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -196,6 +198,7 @@ function isValidBackupPayload(data) {
 }
 
 async function replaceUserDatabase(client, userId, source) {
+  await lockAssetAccount(client, userId);
   await client.query('DELETE FROM transactions WHERE user_id=$1', [userId]);
   await client.query('DELETE FROM monthly_budgets WHERE user_id=$1', [userId]);
   await client.query('DELETE FROM monthly_assets WHERE user_id=$1', [userId]);
@@ -221,6 +224,7 @@ async function replaceUserDatabase(client, userId, source) {
     accounts: source.accounts || [],
     activeScenario: source.activeScenario || 'basic',
     assetStructure: source.assetStructure || emptyAssetStructure,
+    assetImportMappings: source.assetImportMappings || { version: 1, entries: {}, requests: {} },
   };
   if (Array.isArray(source.familyMembers) && source.familyMembers.length > 0) settings.familyMembers = source.familyMembers;
   for (const [key, value] of Object.entries(settings)) {
@@ -367,7 +371,14 @@ app.put('/api/family-members', authenticateToken, async (req, res) => {
     ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value`, [key, req.user.id, JSON.stringify(value)]);
   try {
     await client.query('BEGIN');
+    await lockAssetAccount(client, req.user.id);
     const existingMembers = await readSetting('familyMembers', []);
+    const importMappings = await readSetting('assetImportMappings', { entries: {} });
+    const removedMemberIds = existingMembers.filter(m => !familyMembers.some(n => n.id === m.id)).map(m => m.id);
+    if (Object.values(importMappings.entries || {}).some(m => removedMemberIds.includes(m.memberId))) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: '엑셀 연결 정보가 있는 구성원은 삭제할 수 없습니다.' });
+    }
     // A renamed member disappears from the old name list, but must be migrated,
     // not treated as a deletion subject to the in-use guard.
     const renamedFrom = ownerRename?.from && ownerRename?.to && ownerRename.from !== ownerRename.to ? ownerRename.from : null;
@@ -406,27 +417,23 @@ app.put('/api/assets/structure', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Invalid asset structure payload' });
   }
   try {
-    const db = await getDb();
-    await db.query(`INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
-      ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value`, ['assetStructure', req.user.id, JSON.stringify(assetStructure)]);
+    await saveAssetStructureData(req.user.id, assetStructure);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.put('/api/assets/snapshots/:yearMonth', authenticateToken, async (req, res) => {
-  if (!/^\d{4}-\d{2}$/.test(req.params.yearMonth) || !req.body?.snapshot) return res.status(400).json({ error: 'Invalid asset snapshot payload' });
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(req.params.yearMonth) || !req.body?.snapshot) return res.status(400).json({ error: 'Invalid asset snapshot payload' });
   try {
-    const db = await getDb();
-    await db.query(`INSERT INTO monthly_assets (year_month, user_id, asset_data, updated_at) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, year_month) DO UPDATE SET asset_data=EXCLUDED.asset_data, updated_at=EXCLUDED.updated_at`, [req.params.yearMonth, req.user.id, JSON.stringify(req.body.snapshot), new Date().toISOString()]);
-    res.json({ success: true });
+    const snapshot = await saveManualAssetSnapshot(req.user.id, req.params.yearMonth, req.body.snapshot);
+    res.json({ success: true, snapshot });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/assets/snapshots/:yearMonth', authenticateToken, async (req, res) => {
   if (!/^\d{4}-\d{2}$/.test(req.params.yearMonth)) return res.status(400).json({ error: 'Invalid year month' });
   try {
-    const db = await getDb();
-    await db.query('DELETE FROM monthly_assets WHERE user_id=$1 AND year_month=$2', [req.user.id, req.params.yearMonth]);
+    await removeAssetData(req.user.id, { month: req.params.yearMonth });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -435,25 +442,10 @@ app.delete('/api/assets/items/:group/:id', authenticateToken, async (req, res) =
   const { group, id } = req.params;
   const snapshotKey = { cashItems: 'cash', investItems: 'invest', debtItems: 'debt' }[group];
   if (!snapshotKey) return res.status(400).json({ error: 'Invalid asset group' });
-  const db = await getDb(); const client = await db.connect();
   try {
-    await client.query('BEGIN');
-    const setting = await client.query('SELECT value FROM settings WHERE user_id=$1 AND key=$2', [req.user.id, 'assetStructure']);
-    const storedStructure = setting.rows[0]?.value;
-    const structure = typeof storedStructure === 'string' ? JSON.parse(storedStructure) : (storedStructure || { cashItems: [], investItems: [], debtItems: [] });
-    structure[group] = (structure[group] || []).filter(item => item.id !== id);
-    await client.query(`INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
-      ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value`, ['assetStructure', req.user.id, JSON.stringify(structure)]);
-    const snapshots = await client.query('SELECT year_month, asset_data FROM monthly_assets WHERE user_id=$1', [req.user.id]);
-    for (const row of snapshots.rows) {
-      const snapshot = typeof row.asset_data === 'string' ? JSON.parse(row.asset_data) : (row.asset_data || {});
-      if (!snapshot[snapshotKey] || !(id in snapshot[snapshotKey])) continue;
-      const values = { ...snapshot[snapshotKey] }; delete values[id];
-      await client.query('UPDATE monthly_assets SET asset_data=$1, updated_at=$2 WHERE user_id=$3 AND year_month=$4', [JSON.stringify({ ...snapshot, [snapshotKey]: values }), new Date().toISOString(), req.user.id, row.year_month]);
-    }
-    await client.query('COMMIT'); res.json({ success: true });
-  } catch (err) { await client.query('ROLLBACK'); res.status(500).json({ error: err.message }); }
-  finally { client.release(); }
+    const assetImportMappings = await removeAssetData(req.user.id, { group, id });
+    res.json({ success: true, assetImportMappings });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // 3. 가계부 거래 CRUD API

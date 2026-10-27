@@ -1,5 +1,7 @@
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
+import { randomUUID, createHash } from 'node:crypto';
+import { applyAssetImport, buildAssetReview, currentKstMonth, emptyImportMappings } from './asset-import.js';
 
 const { Pool } = pg;
 
@@ -441,12 +443,143 @@ export async function getFullDatabase(userId) {
     customBudgetPresets,
     activeScenario: settingsMap.activeScenario || 'basic',
     assetStructure: settingsMap.assetStructure || { cashItems: [], investItems: [], debtItems: [] },
+    assetImportMappings: settingsMap.assetImportMappings || emptyImportMappings(),
     familyMembers: settingsMap.familyMembers || [
       { id: 'm1', name: '남편', color: '#3b82f6' },
       { id: 'm2', name: '아내', color: '#ec4899' },
       { id: 'm3', name: '가족공동', color: '#10b981' },
     ],
   };
+}
+
+// Serialize import/manual asset mutations for one authenticated account.
+export async function lockAssetAccount(client, userId) {
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`assets:${userId}`]);
+}
+
+export async function withAssetTransaction(pool, userId, task) {
+  if (!userId) throw new Error('사용자 인증이 필요합니다.');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await lockAssetAccount(client, userId);
+    const result = await task(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) { await client.query('ROLLBACK'); throw err; }
+  finally { client.release(); }
+}
+
+async function readAssetImportState(client, userId, month) {
+  const settings = await client.query('SELECT key, value FROM settings WHERE user_id=$1 AND key = ANY($2::text[])', [userId, ['assetStructure', 'assetImportMappings', 'familyMembers']]);
+  const values = Object.fromEntries(settings.rows.map(r => [r.key, typeof r.value === 'string' ? JSON.parse(r.value) : r.value]));
+  const assets = await client.query('SELECT asset_data FROM monthly_assets WHERE user_id=$1 AND year_month=$2', [userId, month]);
+  const raw = assets.rows[0]?.asset_data;
+  return { structure: values.assetStructure || { cashItems: [], investItems: [], debtItems: [] }, mappings: values.assetImportMappings || emptyImportMappings(), members: values.familyMembers || [{ id: 'm1', name: '남편' }, { id: 'm2', name: '아내' }, { id: 'm3', name: '가족공동' }], snapshot: typeof raw === 'string' ? JSON.parse(raw) : raw || { cash: {}, invest: {}, debt: {} } };
+}
+
+export async function previewAssetImport(userId, month, memberId, parsed, pool) {
+  pool ||= await getDb();
+  return withAssetTransaction(pool, userId, async client => {
+    const state = await readAssetImportState(client, userId, month);
+    const member = state.members.find(m => m.id === memberId);
+    if (!member) throw new Error('구성원을 다시 선택하세요.');
+    const eligible = month === currentKstMonth() && parsed.transactionCount > 0;
+    return { eligible, member, rows: eligible ? buildAssetReview(parsed, member, state.structure, state.mappings, month) : [], warnings: parsed.warnings, investmentStatus: parsed.investmentStatus, reason: month !== currentKstMonth() ? '현재 월이 아니므로 자산을 갱신하지 않습니다.' : !parsed.transactionCount ? '해당 월 거래가 없어 자산을 반영하지 않습니다.' : '', snapshot: state.snapshot };
+  });
+}
+
+export async function commitAssetImport(userId, input, parsed, pool) {
+  pool ||= await getDb();
+  return withAssetTransaction(pool, userId, async client => {
+    const state = await readAssetImportState(client, userId, input.month);
+    const member = state.members.find(m => m.id === input.memberId);
+    if (!member) throw new Error('구성원을 다시 선택하세요.');
+    if (input.month !== currentKstMonth()) throw new Error('월이 변경되었거나 과거 월입니다. 자산은 당월에만 반영할 수 있습니다.');
+    if (!parsed.transactionCount) throw new Error('해당 월 거래가 없어 자산을 반영하지 않습니다.');
+    if (!input.requestId || typeof input.requestId !== 'string' || input.requestId.length > 100) throw new Error('반영 요청을 다시 시작하세요.');
+    const fingerprint = createHash('sha256').update(JSON.stringify([input.memberId, input.month, parsed, input.decisions || {}, input.selectionMode || 'legacy'])).digest('hex');
+    const existing = state.mappings.requests?.[input.requestId];
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) throw new Error('이미 반영된 요청의 내용이 바뀌었습니다. 파일을 다시 선택하세요.');
+      return { ...existing, assetStructure: state.structure, snapshot: state.snapshot, assetImportMappings: state.mappings, replay: true };
+    }
+    const merged = applyAssetImport({ ...state, parsed, member, month: input.month, decisions: input.decisions || {}, selectionMode: input.selectionMode, now: new Date().toISOString(), makeId: () => `asset_${randomUUID()}` });
+    const snapshotUpdated = merged.result.applied.length > 0;
+    merged.mappings.requests ||= {};
+    merged.mappings.requests[input.requestId] = { result: merged.result, month: input.month, fingerprint, snapshotUpdated };
+    const requests = Object.entries(merged.mappings.requests);
+    if (requests.length > 100) merged.mappings.requests = Object.fromEntries(requests.slice(-100));
+    for (const [key, value] of [['assetStructure', merged.structure], ['assetImportMappings', merged.mappings]]) await client.query('INSERT INTO settings (key,user_id,value) VALUES ($1,$2,$3) ON CONFLICT (user_id,key) DO UPDATE SET value=EXCLUDED.value', [key, userId, JSON.stringify(value)]);
+    if (snapshotUpdated) await client.query('INSERT INTO monthly_assets (year_month,user_id,asset_data,updated_at) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id,year_month) DO UPDATE SET asset_data=EXCLUDED.asset_data,updated_at=EXCLUDED.updated_at', [input.month, userId, JSON.stringify(merged.snapshot), new Date().toISOString()]);
+    return { result: merged.result, assetStructure: merged.structure, snapshot: snapshotUpdated ? merged.snapshot : state.snapshot, snapshotUpdated, assetImportMappings: merged.mappings, month: input.month };
+  });
+}
+
+export async function updateImportMapping(userId, key, excluded, pool) {
+  pool ||= await getDb();
+  return withAssetTransaction(pool, userId, async client => {
+    const r = await client.query('SELECT value FROM settings WHERE user_id=$1 AND key=$2', [userId, 'assetImportMappings']);
+    const raw = r.rows[0]?.value, mappings = typeof raw === 'string' ? JSON.parse(raw) : raw || emptyImportMappings();
+    if (!mappings.entries?.[key]) throw new Error('연결 정보를 찾을 수 없습니다.');
+    mappings.entries[key].excluded = excluded;
+    await client.query('UPDATE settings SET value=$1 WHERE user_id=$2 AND key=$3', [JSON.stringify(mappings), userId, 'assetImportMappings']);
+    return mappings;
+  });
+}
+
+export async function saveAssetStructureData(userId, structure, pool) {
+  pool ||= await getDb();
+  return withAssetTransaction(pool, userId, async client => {
+    const state = await readAssetImportState(client, userId, currentKstMonth());
+    const importedIds = new Set(Object.values(state.mappings.entries || {}).map(m => m.targetId));
+    for (const group of ['cashItems', 'investItems', 'debtItems']) {
+      if (!Array.isArray(structure[group]) || structure[group].some(i => !i || typeof i.id !== 'string' || typeof i.name !== 'string' || !i.name.trim())) throw new Error('자산 항목 형식을 확인하세요.');
+      if (state.structure[group].some(i => importedIds.has(i.id) && !structure[group].some(n => n.id === i.id))) throw new Error('다른 작업에서 자산이 추가되었습니다. 새로고침 후 다시 저장하세요.');
+    }
+    await client.query('INSERT INTO settings (key,user_id,value) VALUES ($1,$2,$3) ON CONFLICT (user_id,key) DO UPDATE SET value=EXCLUDED.value', ['assetStructure', userId, JSON.stringify(structure)]);
+  });
+}
+
+export async function saveManualAssetSnapshot(userId, month, snapshot, pool) {
+  pool ||= await getDb();
+  return withAssetTransaction(pool, userId, async client => {
+    const state = await readAssetImportState(client, userId, month);
+    // Import provenance is server-owned; manual inputs only replace numeric groups.
+    const result = { ...state.snapshot };
+    for (const group of ['cash', 'invest', 'debt']) {
+      if (!snapshot[group] || Array.isArray(snapshot[group]) || typeof snapshot[group] !== 'object') throw new Error('잔액 형식을 확인하세요.');
+      result[group] = {};
+      for (const [id, amount] of Object.entries(snapshot[group])) {
+        if (typeof amount !== 'number' || !Number.isFinite(amount)) throw new Error('유효한 숫자를 입력하세요.');
+        result[group][id] = amount;
+      }
+    }
+    await client.query('INSERT INTO monthly_assets (year_month,user_id,asset_data,updated_at) VALUES ($1,$2,$3,$4) ON CONFLICT (user_id,year_month) DO UPDATE SET asset_data=EXCLUDED.asset_data,updated_at=EXCLUDED.updated_at', [month, userId, JSON.stringify(result), new Date().toISOString()]);
+    return result;
+  });
+}
+
+export async function removeAssetData(userId, { month, group, id }, pool) {
+  pool ||= await getDb();
+  return withAssetTransaction(pool, userId, async client => {
+    if (month) { await client.query('DELETE FROM monthly_assets WHERE user_id=$1 AND year_month=$2', [userId, month]); return; }
+    const state = await readAssetImportState(client, userId, currentKstMonth());
+    state.structure[group] = state.structure[group].filter(i => i.id !== id);
+    for (const m of Object.values(state.mappings.entries || {})) if (m.targetId === id) m.excluded = true;
+    for (const [key, value] of [['assetStructure', state.structure], ['assetImportMappings', state.mappings]]) await client.query('INSERT INTO settings (key,user_id,value) VALUES ($1,$2,$3) ON CONFLICT (user_id,key) DO UPDATE SET value=EXCLUDED.value', [key, userId, JSON.stringify(value)]);
+    const snapshots = await client.query('SELECT year_month,asset_data FROM monthly_assets WHERE user_id=$1', [userId]);
+    for (const row of snapshots.rows) {
+      const data = typeof row.asset_data === 'string' ? JSON.parse(row.asset_data) : row.asset_data;
+      delete data[{ cashItems: 'cash', investItems: 'invest', debtItems: 'debt' }[group]]?.[id];
+      if (data.importData) {
+        for (const [key, source] of Object.entries(data.importData.sources || {})) if (source.targetId === id) delete data.importData.sources[key];
+        for (const [key, broker] of Object.entries(data.importData.brokerages || {})) if (broker.targetId === id) delete data.importData.brokerages[key];
+      }
+      await client.query('UPDATE monthly_assets SET asset_data=$1,updated_at=$2 WHERE user_id=$3 AND year_month=$4', [JSON.stringify(data), new Date().toISOString(), userId, row.year_month]);
+    }
+    return state.mappings;
+  });
 }
 
 let syncQueue = Promise.resolve();
