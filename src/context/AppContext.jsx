@@ -257,7 +257,7 @@ export function AppProvider({ children }) {
 
   const saveAssetSnapshot = async (yearMonth, snapshot) => {
     try {
-      await runSaveOperation('assetSnapshot', async () => {
+      const saved = await runSaveOperation('assetSnapshot', async () => {
         const response = await fetch(`/api/assets/snapshots/${yearMonth}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -265,9 +265,10 @@ export function AppProvider({ children }) {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+        return data.snapshot || snapshot;
       });
       skipNextFullSyncRef.current = true;
-      setDb(prev => ({ ...prev, monthlyAssetSnapshots: { ...(prev.monthlyAssetSnapshots || {}), [yearMonth]: snapshot } }));
+      setDb(prev => ({ ...prev, monthlyAssetSnapshots: { ...(prev.monthlyAssetSnapshots || {}), [yearMonth]: saved } }));
       return { success: true };
     } catch (err) { return { success: false, message: err.message }; }
   };
@@ -480,10 +481,11 @@ export function AppProvider({ children }) {
 
   const deleteAssetItem = async (group, id) => {
     try {
-      await runSaveOperation('assetStructure', async () => {
+      const deleted = await runSaveOperation('assetStructure', async () => {
         const response = await fetch(`/api/assets/items/${group}/${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+        return data;
       });
       const snapshotKey = group === 'cashItems' ? 'cash' : group === 'investItems' ? 'invest' : 'debt';
       skipNextFullSyncRef.current = true;
@@ -491,9 +493,14 @@ export function AppProvider({ children }) {
         const structure = prev.assetStructure || EMPTY_ASSET_STRUCTURE;
         const snapshots = Object.fromEntries(Object.entries(prev.monthlyAssetSnapshots || {}).map(([month, snapshot]) => {
           const values = { ...(snapshot[snapshotKey] || {}) }; delete values[id];
-          return [month, { ...snapshot, [snapshotKey]: values }];
+          const importData = snapshot.importData ? structuredClone(snapshot.importData) : undefined;
+          if (importData) {
+            for (const [key, value] of Object.entries(importData.sources || {})) if (value.targetId === id) delete importData.sources[key];
+            for (const [key, value] of Object.entries(importData.brokerages || {})) if (value.targetId === id) delete importData.brokerages[key];
+          }
+          return [month, { ...snapshot, [snapshotKey]: values, ...(importData ? { importData } : {}) }];
         }));
-        return { ...prev, assetStructure: { ...structure, [group]: (structure[group] || []).filter(item => item.id !== id) }, monthlyAssetSnapshots: snapshots };
+        return { ...prev, assetStructure: { ...structure, [group]: (structure[group] || []).filter(item => item.id !== id) }, assetImportMappings: deleted.assetImportMappings || prev.assetImportMappings, monthlyAssetSnapshots: snapshots };
       });
       return { success: true };
     } catch (err) { return { success: false, message: err.message }; }
@@ -1110,6 +1117,36 @@ export function AppProvider({ children }) {
     } catch (err) { return { success: false, message: err.message }; }
   };
 
+  const requestAssetImport = async (mode, payload) => {
+    try {
+      const data = await runSaveOperation('assetImport', async () => {
+        const response = await fetch(`/api/assets/import/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || '자산 가져오기에 실패했습니다.');
+        return body;
+      });
+      if (mode === 'commit') {
+        skipNextFullSyncRef.current = true;
+        setDb(prev => ({ ...prev, assetStructure: data.assetStructure, assetImportMappings: data.assetImportMappings, monthlyAssetSnapshots: data.snapshotUpdated === false ? prev.monthlyAssetSnapshots : { ...prev.monthlyAssetSnapshots, [data.month]: data.snapshot } }));
+      }
+      return data;
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
+  const setImportMappingExcluded = async (key, excluded) => {
+    try {
+      const data = await runSaveOperation('assetImport', async () => {
+        const response = await fetch('/api/assets/import-mappings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ key, excluded }) });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || '설정 저장 실패');
+        return body;
+      });
+      skipNextFullSyncRef.current = true;
+      setDb(prev => ({ ...prev, assetImportMappings: data.mappings }));
+      return { success: true };
+    } catch (err) { return { success: false, message: err.message }; }
+  };
+
   // 거래 분할
   const splitTransaction = async (origTxId, splitItems) => {
     const origTx = db.transactions.find(t => t.id === origTxId);
@@ -1360,6 +1397,8 @@ export function AppProvider({ children }) {
         deleteTransaction,
         deleteMonthTransactions,
         batchImportTransactions,
+        requestAssetImport,
+        setImportMappingExcluded,
         splitTransaction,
         setCategoryBudget,
         setAllCategoryBudgets,

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatKRW, formatInputNumber, parseInputNumber } from '../utils/finance';
+import AssetImportInfo from './AssetImportInfo';
 import { Landmark, TrendingUp, CreditCard, PiggyBank, BarChart3, LineChart, Trash2, AlertTriangle, Plus, Edit3, X } from 'lucide-react';
 
 function useContainerWidth() {
@@ -207,10 +208,10 @@ export default function AccountsView() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#fff' }}>
-            🏛️ 총 자산 관리 ({yearStr}년 {parseInt(monthStr)}월말 자산 현황)
+            🏛️ 총 자산 관리 ({yearStr}년 {parseInt(monthStr)}월 자산 현황)
           </h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            매월 말일 기준의 현금 계좌, 투자/자산, 부채 금액을 수기 입력하여 관리합니다.
+            당월 엑셀 반영 또는 수기 입력으로 관리합니다. 과거 월 잔액은 수기로 보정할 수 있습니다.
           </p>
         </div>
 
@@ -231,6 +232,7 @@ export default function AccountsView() {
         </button>
       </div>
 
+      <AssetImportInfo month={selectedMonth} snapshot={snap} editingSnapshot={editingSnapshot} />
       {/* 상단 4대 핵심 자산 요약 KPI 카드 */}
       <div className="grid-cards">
         {/* 총자산 */}

@@ -37,6 +37,7 @@ export function getInitialDbStructure() {
     transactions: [],
     monthlyBudgets: {},
     monthlyAssetSnapshots: {},
+    assetImportMappings: { version: 1, entries: {}, requests: {} },
     customBudgetPresets: {},
     activeScenario: 'basic',
   };
@@ -145,6 +146,7 @@ export async function loadDatabaseAsync(token) {
       transactions: serverDb.transactions || [],
       monthlyBudgets: serverDb.monthlyBudgets || {},
       monthlyAssetSnapshots: serverDb.monthlyAssetSnapshots || {},
+      assetImportMappings: serverDb.assetImportMappings || { version: 1, entries: {}, requests: {} },
       customBudgetPresets: (serverDb.customBudgetPresets && Object.keys(serverDb.customBudgetPresets).length > 0)
         ? serverDb.customBudgetPresets
         : (serverDb.userInfo?.username === 'togom' ? { basic: DEFAULT_BASIC_PRESET } : {}),

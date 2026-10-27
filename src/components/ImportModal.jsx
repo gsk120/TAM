@@ -1,251 +1,130 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { parseExcelOrCsvFile, detectDuplicates } from '../utils/excelParser';
 import { formatKRW } from '../utils/finance';
-import { X, UploadCloud, AlertCircle, CheckCircle2, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { X, UploadCloud, ReceiptText, Landmark, CircleCheck, LoaderCircle } from 'lucide-react';
+import { initialImportDecisions, importSelectionSummary } from '../../server/asset-import-selection.js';
+import AssetImportReview from './AssetImportReview';
+import ImportStatus from './ImportStatus';
+import './AssetImport.css';
 
 export default function ImportModal({ onClose, targetMonth }) {
-  const { db, batchImportTransactions, familyMembers } = useApp();
+  const { db, batchImportTransactions, familyMembers, requestAssetImport } = useApp();
+  const [owner, setOwner] = useState(() => familyMembers?.[0]?.name || '가족공동');
+  const [fileName, setFileName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState('');
+  const [tab, setTab] = useState('transactions');
+  const [candidates, setCandidates] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [payload, setPayload] = useState(null);
+  const [decisions, setDecisions] = useState({});
+  const [done, setDone] = useState({});
+  const [results, setResults] = useState({});
+  const [errors, setErrors] = useState({});
+  const busy = loading || Boolean(saving);
+  const summary = importSelectionSummary(preview?.rows || [], decisions);
+  const transactionCount = candidates?.filter(c => c.selected).length || 0;
+  const newTransactions = candidates?.filter(c => !c.duplicateStatus || c.duplicateStatus === 'NONE').length || 0;
 
-  const [selectedOwner, setSelectedOwner] = useState(() => (familyMembers && familyMembers.length > 0 ? familyMembers[0].name : '가족공동'));
-  const [isLoading, setIsLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(null);
-  const [candidates, setCandidates] = useState(null); // 중복 탐지 완료된 거래 항목
+  useEffect(() => {
+    if (!busy) return undefined;
+    const warn = event => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [busy]);
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+  const reset = () => { setCandidates(null); setPreview(null); setPayload(null); setDecisions({}); setDone({}); setResults({}); setErrors({}); setFileName(''); setTab('transactions'); };
+  const updateDecision = (key, decision) => {
+    setDecisions(prev => ({ ...prev, [key]: decision }));
+    setPayload(prev => prev ? { ...prev, requestId: crypto.randomUUID() } : prev);
+    setErrors(prev => ({ ...prev, assets: '' }));
+  };
+  const upload = async event => {
+    const file = event.target.files[0];
     if (!file) return;
-
-    // 스마트 파일명 감지 (파일명에 가족 구성원 이름이 들어있으면 소유자 자동 변경)
-    let activeOwner = selectedOwner;
-    if (familyMembers && familyMembers.length > 0) {
-      const matched = familyMembers.find(m => file.name.includes(m.name));
-      if (matched) {
-        activeOwner = matched.name;
-        setSelectedOwner(matched.name);
-      }
-    }
-
-    setIsLoading(true);
-    setErrorMsg(null);
-
+    const activeOwner = familyMembers.find(m => file.name.includes(m.name))?.name || owner;
+    setLoading(true); setOwner(activeOwner); setFileName(file.name); setErrors({}); setDone({}); setResults({}); setPreview(null); setPayload(null); setDecisions({}); setTab('transactions');
     try {
-      const parsedTxs = await parseExcelOrCsvFile(file, targetMonth);
-      if (!parsedTxs || parsedTxs.length === 0) {
-        setErrorMsg(`${targetMonth}에 해당하는 거래 내역이 없습니다.`);
-        setIsLoading(false);
-        return;
+      const parsed = await parseExcelOrCsvFile(file, targetMonth);
+      setCandidates(detectDuplicates(parsed.map(tx => ({ ...tx, owner: activeOwner })), db.transactions.filter(tx => tx.date.slice(0, 7) === targetMonth)));
+      if (/\.xlsx?$/i.test(file.name)) {
+        const buffer = new Uint8Array(await file.arrayBuffer());
+        if (buffer.length > 6 * 1024 * 1024) { setPreview({ success: false, message: '6MB를 초과해 자산 분석을 생략합니다.' }); return; }
+        let binary = '';
+        for (let i = 0; i < buffer.length; i += 32768) binary += String.fromCharCode(...buffer.subarray(i, i + 32768));
+        const input = { file: btoa(binary), month: targetMonth, memberId: familyMembers.find(m => m.name === activeOwner)?.id, requestId: crypto.randomUUID(), selectionMode: 'explicit' };
+        setPayload(input);
+        const response = await requestAssetImport('preview', input);
+        setPreview(response);
+        if (response.success) setDecisions(initialImportDecisions(response.rows || []));
       }
-
-      // 엑셀에서 추출된 거래 내역 전체에 선택된 owner 지정
-      const txsWithOwner = parsedTxs.map(tx => ({
-        ...tx,
-        owner: activeOwner,
-      }));
-
-      // 중복 탐지 실행
-      const evaluated = detectDuplicates(txsWithOwner, db.transactions.filter(tx => tx.date.slice(0, 7) === targetMonth));
-      setCandidates(evaluated);
-    } catch (err) {
-      console.error('File parse error:', err);
-      setErrorMsg('파일을 읽는 중 오류가 발생했습니다: ' + err.message);
-    } finally {
-      setIsLoading(false);
+    } catch (err) { setErrors({ transactions: `파일을 읽지 못했습니다: ${err.message}` }); }
+    finally { setLoading(false); }
+  };
+  const saveTransactions = async () => {
+    if (busy || done.transactions || !transactionCount) return;
+    setSaving('transactions'); setErrors(prev => ({ ...prev, transactions: '' }));
+    try {
+      const transactions = candidates.filter(c => c.selected).map(c => {
+        const transaction = { ...c }; delete transaction.selected; delete transaction.duplicateStatus; delete transaction.duplicateReason; return transaction;
+      });
+      const response = await batchImportTransactions(transactions);
+      if (!response.success) throw new Error(response.message || '거래 저장에 실패했습니다.');
+      setDone(prev => ({ ...prev, transactions: true }));
+      setResults(prev => ({ ...prev, transactions: `거래 ${transactions.length}건 등록 완료` }));
+    } catch (err) { setErrors(prev => ({ ...prev, transactions: err.message })); }
+    finally { setSaving(''); }
+  };
+  const saveAssets = async () => {
+    if (busy || done.assets || !preview?.eligible || (!summary.selected && !summary.settings)) return;
+    setSaving('assets'); setErrors(prev => ({ ...prev, assets: '' }));
+    try {
+      const response = await requestAssetImport('commit', { ...payload, decisions });
+      if (!response.success) throw new Error(response.message || '자산 저장에 실패했습니다.');
+      setDone(prev => ({ ...prev, assets: true }));
+      setResults(prev => ({ ...prev, assets: `${summary.selected ? `선택 자산 ${summary.selected}개 반영 완료` : '잔액 변경 없음'}${summary.deposits ? ` · 예수금 ${summary.deposits}개 포함` : ''}${summary.settings ? ` · 제외 설정 ${summary.settings}개 저장` : ''}${response.result.held.length ? ` · 보류 ${response.result.held.length}개` : ''}` }));
+    } catch (err) { setErrors(prev => ({ ...prev, assets: err.message })); }
+    finally { setSaving(''); }
+  };
+  const tabKey = event => {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const next = event.key === 'Home' ? 'transactions' : event.key === 'End' ? 'assets' : tab === 'assets' ? 'transactions' : 'assets';
+      setTab(next); document.getElementById(`import-tab-${next}`)?.focus();
     }
   };
 
-  const handleToggleSelect = (id) => {
-    setCandidates(prev => prev.map(c => c.id === id ? { ...c, selected: !c.selected } : c));
-  };
-
-  const handleSelectAll = (selectVal) => {
-    setCandidates(prev => prev.map(c => ({ ...c, selected: selectVal })));
-  };
-
-  const handleConfirmImport = async () => {
-    const selectedTxs = candidates.filter(c => c.selected).map(({ selected, duplicateStatus, duplicateReason, ...tx }) => tx);
-    if (selectedTxs.length === 0) {
-      alert('가져올 거래 항목을 하나 이상 선택하세요.');
-      return;
-    }
-
-    setIsLoading(true);
-    const res = await batchImportTransactions(selectedTxs);
-    setIsLoading(false);
-    if (!res.success) {
-      setErrorMsg(res.message || '거래 내역 저장에 실패했습니다.');
-      return;
-    }
-    alert(`${selectedTxs.length}건의 거래 내역을 가계부에 등록했습니다! (${targetMonth})`);
-    onClose();
-  };
-
-  const selectedCount = candidates ? candidates.filter(c => c.selected).length : 0;
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: '950px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div>
-            <h3 style={{ fontSize: '1.3rem', fontWeight: '700', color: '#fff' }}>
-              📥 뱅크샐러드 / 엑셀 거래 가져오기 및 중복 검증
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              등록 대상: {targetMonth} · 원본 엑셀에서 해당 월 거래만 가져오고 중복을 확인합니다.
-            </p>
-          </div>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
-            <X size={22} />
-          </button>
-        </div>
-
-        {/* 소유자 일괄 선택 세그먼트 버튼 */}
-        {!candidates && (
-          <div style={{ background: 'rgba(30, 41, 59, 0.7)', padding: '14px 18px', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '700', color: '#fff', marginBottom: '8px' }}>
-              👤 이 엑셀 파일의 거래 소유자(Owner)를 선택하세요:
-            </label>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {(familyMembers || [{ id: 'm1', name: '남편', color: '#3b82f6' }, { id: 'm2', name: '아내', color: '#ec4899' }, { id: 'm3', name: '가족공동', color: '#10b981' }]).map(m => {
-                const isSelected = selectedOwner === m.name;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setSelectedOwner(m.name)}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '8px',
-                      border: isSelected ? `2px solid ${m.color || '#3b82f6'}` : '1px solid rgba(255, 255, 255, 0.15)',
-                      background: isSelected ? 'rgba(59, 130, 246, 0.2)' : 'rgba(15, 23, 42, 0.6)',
-                      color: isSelected ? '#fff' : 'var(--text-muted)',
-                      fontWeight: isSelected ? '700' : '500',
-                      fontSize: '0.88rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      transition: 'all 0.2s ease',
-                    }}
-                  >
-                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: m.color || '#3b82f6' }} />
-                    {m.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 파일 선택 영역 */}
-        {!candidates && (
-          <div style={{ border: '2px dashed var(--border-highlight)', borderRadius: 'var(--radius-md)', padding: '40px', textAlign: 'center', background: 'rgba(15, 23, 42, 0.5)', margin: '10px 0 20px 0' }}>
-            <UploadCloud size={48} color="var(--accent-cyan)" style={{ marginBottom: '12px' }} />
-            <h4 style={{ fontSize: '1.1rem', fontWeight: '600', color: '#fff', marginBottom: '8px' }}>
-              뱅크샐러드 또는 가계부 엑셀/CSV 파일 선택
-            </h4>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              선택된 소유자 [<strong style={{ color: 'var(--accent-cyan)' }}>{selectedOwner}</strong>] 소유로 {targetMonth} 거래만 등록됩니다.
-            </p>
-            <input
-              type="file"
-              accept=".xlsx, .xls, .csv"
-              onChange={handleFileUpload}
-              style={{ display: 'none' }}
-              id="excel-file-input"
-            />
-            <label htmlFor="excel-file-input" className="btn btn-primary" style={{ cursor: 'pointer' }}>
-              파일 탐색기에서 파일 선택
-            </label>
-            {isLoading && <p style={{ marginTop: '12px', color: 'var(--accent-cyan)' }}>파일 분석 및 [{selectedOwner}] 매핑 중...</p>}
-            {errorMsg && <p style={{ marginTop: '12px', color: 'var(--accent-rose)' }}>⚠️ {errorMsg}</p>}
-          </div>
-        )}
-
-
-        {/* 중복 탐지 미리보기 및 최종 확인 표 */}
-        {candidates && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(30, 41, 59, 0.6)', padding: '12px 16px', borderRadius: '8px' }}>
-              <span style={{ fontSize: '0.9rem', color: '#fff' }}>
-                {targetMonth} 분석: <strong>{candidates.length}건</strong> | 등록 대상: <strong style={{ color: 'var(--accent-emerald)' }}>{selectedCount}건</strong>
-              </span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => handleSelectAll(true)}>전체 선택</button>
-                <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.8rem' }} onClick={() => handleSelectAll(false)}>전체 해제</button>
-              </div>
-            </div>
-
-            <div className="data-table-container" style={{ maxHeight: '420px', overflowY: 'auto' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: '40px' }}>선택</th>
-                    <th>상태 / 중복 사유</th>
-                    <th>날짜 (A)</th>
-                    <th>타입 (B)</th>
-                    <th>대분류 (C)</th>
-                    <th>내용 (D)</th>
-                    <th>금액 (E)</th>
-                    <th>비고 (F) / 보험</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {candidates.map(item => {
-                    const isExact = item.duplicateStatus === 'EXACT';
-                    const isFuzzy = item.duplicateStatus === 'FUZZY';
-                    const isMedical = item.category === '의료비';
-                    const isClaimed = (item.memo || '').includes('보험받음');
-
-                    return (
-                      <tr key={item.id} style={{ opacity: item.selected ? 1 : 0.5, background: isExact ? 'rgba(244, 63, 94, 0.08)' : isFuzzy ? 'rgba(245, 158, 11, 0.08)' : 'transparent' }}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={item.selected}
-                            onChange={() => handleToggleSelect(item.id)}
-                            style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                          />
-                        </td>
-                        <td>
-                          {isExact && <span className="badge badge-danger">🛑 완전 중복</span>}
-                          {isFuzzy && <span className="badge badge-warning">⚠️ 의심 중복</span>}
-                          {!isExact && !isFuzzy && <span className="badge badge-stable">✨ 신규 거래</span>}
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', marginTop: '2px' }}>{item.duplicateReason}</div>
-                        </td>
-                        <td>{item.date}</td>
-                        <td>{item.type}</td>
-                        <td>{item.category}</td>
-                        <td>{item.description}</td>
-                        <td style={{ fontWeight: '600' }}>{formatKRW(item.amount)}</td>
-                        <td>
-                          {isMedical && isClaimed ? (
-                            <span className="badge badge-stable" style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
-                              <ShieldCheck size={12} /> 보험받음
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{item.memo || '-'}</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-              <button className="btn btn-secondary" onClick={() => setCandidates(null)}>전체 취소 및 다시 선택</button>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button className="btn btn-secondary" onClick={onClose}>닫기</button>
-                <button className="btn btn-primary" onClick={handleConfirmImport} disabled={isLoading}>
-                  {isLoading ? '저장 중…' : `선택한 ${selectedCount}건 가계부에 일괄 저장`}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+  return <div className="modal-overlay"><div className="modal-content asset-import-modal import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-dialog-title">
+    <header className="import-dialog-header"><div><h3 id="import-dialog-title">엑셀 가져오기</h3><p>{targetMonth} · {owner}{fileName && <> · <span title={fileName}>{fileName}</span></>}</p></div><button type="button" className="import-close" aria-label="가져오기 닫기" disabled={busy} onClick={onClose}><X size={22} /></button></header>
+    {candidates === null ? <div className="import-file-panel">
+      <label>구성원 <select className="input" aria-label="엑셀 소유 구성원" disabled={busy} value={owner} onChange={e => setOwner(e.target.value)}>{familyMembers.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
+      <div className="import-dropzone"><UploadCloud size={36} /><h4>뱅크샐러드 엑셀을 선택하세요</h4><p>한 번 선택하고 거래와 총자산을 각각 등록합니다.</p><input id="excel-file-input" type="file" accept=".xlsx,.xls,.csv" disabled={busy} onChange={upload} /><label htmlFor="excel-file-input" className="btn btn-primary">파일 선택</label></div>
+      {errors.transactions && <p role="alert">{errors.transactions}</p>}
+    </div> : <>
+      <div className="import-tabs" role="tablist" aria-label="등록 구분" onKeyDown={tabKey}>
+        {[['transactions', '거래내역 등록', `신규 ${newTransactions}건`, ReceiptText], ['assets', '총자산 등록', `확인 필요 ${summary.needsReview}개`, Landmark]].map(([id, label, count, Icon]) => <button key={id} type="button" id={`import-tab-${id}`} role="tab" aria-selected={tab === id} aria-controls={`import-panel-${id}`} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
+          <Icon className="import-tab-icon" size={20} aria-hidden="true" />
+          <span className="import-tab-label">{label}</span>
+          <span className={`import-tab-count ${done[id] ? 'is-done' : ''}`}>{saving === id ? <><LoaderCircle size={13} className="import-spin" aria-hidden="true" />저장 중</> : done[id] ? <><CircleCheck size={13} aria-hidden="true" />완료</> : count}</span>
+        </button>)}
       </div>
-    </div>
-  );
+      <div className="import-dialog-body">
+        <section role="tabpanel" id="import-panel-transactions" aria-labelledby="import-tab-transactions" hidden={tab !== 'transactions'}>
+          <div className="import-tab-summary"><span>조회월 거래 <b>{candidates.length}건</b> · 선택 <b>{transactionCount}건</b></span><div><button className="btn btn-secondary" disabled={busy || done.transactions} onClick={() => setCandidates(prev => prev.map(c => ({ ...c, selected: true })))}>전체 선택</button><button className="btn btn-secondary" disabled={busy || done.transactions} onClick={() => setCandidates(prev => prev.map(c => ({ ...c, selected: false })))}>전체 해제</button></div></div>
+          <div className="import-table-scroll"><table className="data-table import-transactions-table"><thead><tr><th>선택</th><th>상태</th><th>날짜</th><th>타입</th><th>대분류</th><th>내용</th><th className="import-number">금액</th><th>메모</th></tr></thead><tbody>{candidates.map(item => <tr key={item.id} className={item.selected ? 'import-row-selected' : ''}>
+            <td><input type="checkbox" aria-label={`${item.description} 거래 선택`} checked={item.selected} disabled={busy || done.transactions} onChange={() => setCandidates(prev => prev.map(c => c.id === item.id ? { ...c, selected: !c.selected } : c))} /></td>
+            <td><ImportStatus tone={item.duplicateStatus === 'EXACT' || item.duplicateStatus === 'FUZZY' ? 'review' : 'new'}>{item.duplicateStatus === 'EXACT' ? '완전 중복' : item.duplicateStatus === 'FUZZY' ? '의심 중복' : '신규'}</ImportStatus>{item.duplicateReason && <small>{item.duplicateReason}</small>}</td><td>{item.date}</td><td>{item.type}</td><td>{item.category}</td><td>{item.description}</td><td className="import-number">{formatKRW(item.amount)}</td><td>{item.memo || '—'}</td>
+          </tr>)}{!candidates.length && <tr><td colSpan={8} className="import-empty">{targetMonth} 거래가 없습니다. 다른 월의 거래는 등록하지 않습니다.</td></tr>}</tbody></table></div>
+        </section>
+        <section role="tabpanel" id="import-panel-assets" aria-labelledby="import-tab-assets" hidden={tab !== 'assets'}>
+          <AssetImportReview preview={preview} decisions={decisions} onChange={updateDecision} structure={db.assetStructure} month={targetMonth} owner={owner} disabled={busy || done.assets} />
+        </section>
+        {loading && <p role="status" className="import-notice">파일을 분석하고 있습니다.</p>}
+        {errors[tab] && <p role="alert" className="import-error">{errors[tab]} · 선택을 유지했습니다. 다시 시도하세요.</p>}
+        {results[tab] && <p role="status" className="asset-import-result">{results[tab]}</p>}
+      </div>
+      <footer className="import-dialog-footer"><div>{tab === 'assets' && <><small>선택 자산 {summary.selected}개{summary.deposits ? ` · 예수금 ${summary.deposits}개 포함` : ''}{summary.settings ? ` · 제외 설정 ${summary.settings}개` : ''} · 필터 밖 선택도 반영</small><small>당월 수기 보정값이 변경될 수 있습니다.</small></>}</div><div className="import-footer-actions"><button className="btn btn-secondary" disabled={busy} onClick={reset}>다른 파일</button><button className="btn btn-primary" disabled={busy || done[tab] || (tab === 'transactions' ? !transactionCount : !preview?.eligible || (!summary.selected && !summary.settings))} onClick={tab === 'transactions' ? saveTransactions : saveAssets}>{saving === tab ? '저장 중…' : done[tab] ? '저장 완료' : tab === 'transactions' ? `선택 거래 ${transactionCount}건 등록` : summary.selected ? `선택 자산 ${summary.selected}개 반영` : '제외 설정 저장'}</button></div></footer>
+    </>}
+  </div></div>;
 }
