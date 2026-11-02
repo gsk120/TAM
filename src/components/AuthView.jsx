@@ -45,7 +45,7 @@ export default function AuthView({ onLogin, onRegister }) {
 
     setIsLoading(true);
     try {
-      await onLogin(loginForm.username.trim(), loginForm.password.trim());
+      await onLogin(loginForm.username.trim(), loginForm.password);
     } catch (err) {
       setErrorMsg(err.message || '로그인 중 오류가 발생했습니다.');
     } finally {

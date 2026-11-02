@@ -231,8 +231,30 @@ async function migrateCategoryCostTypes(pool) {
 // 사용자 관련 DB 헬퍼 함수
 export async function findUserByUsername(username) {
   const db = await getDb();
-  const res = await db.query('SELECT * FROM users WHERE username = $1', [username]);
+  const res = await db.query(`SELECT u.*, COALESCE((SELECT value FROM settings WHERE user_id=u.id AND key='authSessionVersion'), '') AS session_version FROM users u WHERE username=$1`, [username]);
   return res.rows[0] || null;
+}
+
+export async function getAuthUserById(userId) {
+  const db = await getDb();
+  const result = await db.query(`SELECT u.id,u.username,u.password_hash,COALESCE((SELECT value FROM settings WHERE user_id=u.id AND key='authSessionVersion'), '') AS session_version FROM users u WHERE id=$1`, [userId]);
+  return result.rows[0] || null;
+}
+
+export async function updateAccountPassword(userId, expectedHash, newHash, pool) {
+  if (!userId) throw new Error('user_id is required');
+  const client = await (pool || await getDb()).connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query('UPDATE users SET password_hash=$1 WHERE id=$2 AND password_hash=$3 RETURNING id', [newHash, userId, expectedHash]);
+    if (!result.rowCount) { await client.query('ROLLBACK'); return false; }
+    await client.query(`INSERT INTO settings (key,user_id,value) VALUES ($1,$2,$3) ON CONFLICT (user_id,key) DO UPDATE SET value=EXCLUDED.value`, ['authSessionVersion', userId, randomUUID()]);
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
 }
 
 export async function getUserById(id) {

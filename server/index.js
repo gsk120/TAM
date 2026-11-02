@@ -1,5 +1,7 @@
 import { createAiRouter } from './ai-routes.js';
 import { createAssetImportRouter } from './asset-import-routes.js';
+import { createSessionAuth, createPasswordRouter } from './session-auth.js';
+import { getAuthUserById, updateAccountPassword } from './db.js';
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -38,22 +40,9 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // Auth 미들웨어 (JWT 검증)
-function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+const authenticateToken = createSessionAuth({ secret: JWT_SECRET, loadUser: getAuthUserById });
 
-  if (!token) {
-    return res.status(401).json({ error: '인증 토큰이 필요합니다.' });
-  }
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: '유효하지 않거나 만료된 토큰입니다.' });
-    }
-    req.user = user;
-    next();
-  });
-}
+app.use('/api/auth', createPasswordRouter({ authenticate: authenticateToken, loadUser: getAuthUserById, updatePassword: updateAccountPassword }));
 
 app.use('/api/ai', createAiRouter(authenticateToken));
 app.use('/api/assets', createAssetImportRouter(authenticateToken));
@@ -87,7 +76,7 @@ app.post('/api/auth/register', async (req, res) => {
       income_categories,
       initial_budgets,
     });
-    const token = jwt.sign({ id: newUser.id, username: newUser.username }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ id: newUser.id, username: newUser.username, sv: '' }, JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
 
     res.json({
       success: true,
@@ -122,7 +111,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: '아이디 또는 비밀번호가 올바르지 않습니다.' });
     }
 
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '30d' });
+    const token = jwt.sign({ id: user.id, username: user.username, sv: user.session_version || '' }, JWT_SECRET, { expiresIn: '30d', algorithm: 'HS256' });
 
     res.json({
       success: true,
@@ -203,7 +192,8 @@ async function replaceUserDatabase(client, userId, source) {
   await client.query('DELETE FROM monthly_budgets WHERE user_id=$1', [userId]);
   await client.query('DELETE FROM monthly_assets WHERE user_id=$1', [userId]);
   await client.query('DELETE FROM custom_budget_presets WHERE user_id=$1', [userId]);
-  await client.query('DELETE FROM settings WHERE user_id=$1', [userId]);
+  // Account security state must survive financial-data reset/restore.
+  await client.query("DELETE FROM settings WHERE user_id=$1 AND key <> 'authSessionVersion'", [userId]);
 
   for (const [index, transaction] of (source.transactions || []).entries()) {
     const normalized = normalizeTransaction(transaction, `restore_${Date.now()}_${index}`);

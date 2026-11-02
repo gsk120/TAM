@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import PasswordSettings from './PasswordSettings';
 import * as XLSX from 'xlsx';
 import { Download, Upload, RotateCcw, ShieldCheck, Users, Plus, Trash2, Edit3, Check } from 'lucide-react';
 
@@ -340,6 +341,8 @@ export default function SettingsView() {
           </button>
         </div>
       </div>
+
+      <PasswordSettings disabled={isDataOperationSaving} />
 
       {isDataOperationSaving && (
         <div className="modal-overlay" style={{ zIndex: 2000, background: 'rgba(2, 6, 23, 0.88)' }}>
