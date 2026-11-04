@@ -1,6 +1,6 @@
 import { createAiRouter } from './ai-routes.js';
 import { createAssetImportRouter } from './asset-import-routes.js';
-import { createSessionAuth, createPasswordRouter } from './session-auth.js';
+import { createSessionAuth, createPasswordRouter, passwordValidationError } from './session-auth.js';
 import { getAuthUserById, updateAccountPassword } from './db.js';
 import 'dotenv/config';
 import express from 'express';
@@ -16,7 +16,10 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const JWT_SECRET = process.env.JWT_SECRET || 'household_asset_management_jwt_secret_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (typeof JWT_SECRET !== 'string' || !JWT_SECRET.trim()) {
+  throw new Error('JWT_SECRET이 설정되지 않았습니다. 환경변수에 비밀키를 설정한 후 서버를 시작하세요.');
+}
 
 function normalizeTransaction(transaction, fallbackId = String(Date.now())) {
   return {
@@ -61,6 +64,9 @@ app.post('/api/auth/register', async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ error: '아이디와 비밀번호를 입력하세요.' });
     }
+
+    const invalidPassword = passwordValidationError(password);
+    if (invalidPassword) return res.status(400).json({ error: invalidPassword });
 
     const existingUser = await findUserByUsername(username);
     if (existingUser) {

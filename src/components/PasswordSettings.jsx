@@ -41,8 +41,8 @@ export default function PasswordSettings({ disabled = false }) {
     if (pending.current || done) return;
     setError('');
     if (password !== confirm) { setError('새 비밀번호와 확인 값이 일치하지 않습니다.'); return; }
-    if (password.length < 12 || new TextEncoder().encode(password).length > 72 || !password.trim()) {
-      setError('새 비밀번호는 12자 이상, UTF-8 기준 72바이트 이내로 입력해 주세요.'); return;
+    if (password.length < 8 || new TextEncoder().encode(password).length > 72 || !password.trim()) {
+      setError('새 비밀번호는 8자 이상, UTF-8 기준 72바이트 이내로 입력해 주세요.'); return;
     }
     pending.current = true; setSaving(true);
     try {
@@ -70,9 +70,9 @@ export default function PasswordSettings({ disabled = false }) {
       <form id="password-change-form" onSubmit={submit} style={{ display: 'grid', gap: 14 }}>
         <input autoComplete="username" value={user?.username || ''} readOnly hidden />
         <label>현재 비밀번호<input ref={currentRef} className="input" style={{ width: '100%', marginTop: 6 }} type="password" autoComplete="current-password" required disabled={saving} value={current} onChange={e => setCurrent(e.target.value)} /></label>
-        <label>새 비밀번호<input className="input" style={{ width: '100%', marginTop: 6 }} type="password" autoComplete="new-password" required minLength={12} disabled={saving} value={password} onChange={e => setPassword(e.target.value)} /></label>
+        <label>새 비밀번호<input className="input" style={{ width: '100%', marginTop: 6 }} type="password" autoComplete="new-password" required minLength={8} disabled={saving} value={password} onChange={e => setPassword(e.target.value)} /></label>
         <label>새 비밀번호 확인<input className="input" style={{ width: '100%', marginTop: 6 }} type="password" autoComplete="new-password" required disabled={saving} value={confirm} onChange={e => setConfirm(e.target.value)} /></label>
-        <small style={{ color: 'var(--text-muted)' }}>12자 이상 · 한글 등 다중 바이트 문자를 포함해 최대 72바이트</small>
+        <small style={{ color: 'var(--text-muted)' }}>8자 이상 · 한글 등 다중 바이트 문자를 포함해 최대 72바이트</small>
         {error && <p role="alert" style={{ color: 'var(--accent-rose, #fda4af)' }}>{error}</p>}
       </form>
     </>}

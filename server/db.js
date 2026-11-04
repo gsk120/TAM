@@ -72,9 +72,6 @@ export async function getDb() {
       await pgPoolInstance.query(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
       await pgPoolInstance.query(`ALTER TABLE settings ADD COLUMN IF NOT EXISTS user_id TEXT;`);
 
-      // togom 대표 계정 생성 및 기존 NULL 데이터 마이그레이션
-      await migrateDefaultUser(pgPoolInstance);
-
       // 복합 기본키(Composite PK) 마이그레이션 수행
       await migrateCompositeKeys(pgPoolInstance);
 
@@ -87,47 +84,6 @@ export async function getDb() {
     console.log('✅ Connected to Supabase PostgreSQL Database with Multi-tenancy');
   }
   return pgPoolInstance;
-}
-
-// 기본 togom 계정 생성 및 기존 NULL user_id 데이터 자동 이관
-async function migrateDefaultUser(pool) {
-  const userCheck = await pool.query('SELECT * FROM users WHERE username = $1', ['togom']);
-  let defaultUserId;
-
-  if (userCheck.rows.length === 0) {
-    defaultUserId = 'user_togom_' + Date.now();
-    const hashedPw = await bcrypt.hash('1122', 10);
-    await pool.query(
-      `INSERT INTO users (id, username, password_hash, household_name, created_at)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [defaultUserId, 'togom', hashedPw, '우리 가족 가계부', new Date().toISOString()]
-    );
-    console.log('✨ Created default user: togom (ID:', defaultUserId, ')');
-  } else {
-    defaultUserId = userCheck.rows[0].id;
-  }
-
-  // 기존 user_id가 NULL인 레코드들을 defaultUserId로 이관
-  await pool.query('UPDATE transactions SET user_id = $1 WHERE user_id IS NULL OR user_id = \'\'', [defaultUserId]);
-  await pool.query('UPDATE monthly_budgets SET user_id = $1 WHERE user_id IS NULL OR user_id = \'\'', [defaultUserId]);
-  await pool.query('UPDATE monthly_assets SET user_id = $1 WHERE user_id IS NULL OR user_id = \'\'', [defaultUserId]);
-  await pool.query('UPDATE custom_budget_presets SET user_id = $1 WHERE user_id IS NULL OR user_id = \'\'', [defaultUserId]);
-  await pool.query('UPDATE settings SET user_id = $1 WHERE user_id IS NULL OR user_id = \'\'', [defaultUserId]);
-
-  // 기본 가족 구성원 세팅 확인 및 등록 (없으면)
-  const familyCheck = await pool.query('SELECT * FROM settings WHERE key = $1 AND user_id = $2', ['familyMembers', defaultUserId]);
-  if (familyCheck.rows.length === 0) {
-    const defaultMembers = [
-      { id: 'm1', name: '남편', color: '#3b82f6' },
-      { id: 'm2', name: '아내', color: '#ec4899' },
-      { id: 'm3', name: '가족공동', color: '#10b981' },
-    ];
-    await pool.query(
-      `INSERT INTO settings (key, user_id, value) VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value`,
-      ['familyMembers', defaultUserId, JSON.stringify(defaultMembers)]
-    );
-  }
 }
 
 // 복합 기본키(Composite PK) 마이그레이션

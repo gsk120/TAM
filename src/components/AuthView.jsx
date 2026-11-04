@@ -66,6 +66,10 @@ export default function AuthView({ onLogin, onRegister }) {
       setErrorMsg('비밀번호를 입력해 주세요.');
       return;
     }
+    if (signUpForm.password.length < 8 || new TextEncoder().encode(signUpForm.password).length > 72 || !signUpForm.password.trim()) {
+      setErrorMsg('비밀번호는 8자 이상, UTF-8 기준 72바이트 이내로 입력해 주세요.');
+      return;
+    }
     if (signUpForm.password !== signUpForm.passwordConfirm) {
       setErrorMsg('비밀번호가 일치하지 않습니다.');
       return;
@@ -498,7 +502,8 @@ export default function AuthView({ onLogin, onRegister }) {
                     </label>
                     <input
                       type="password"
-                      placeholder="비밀번호"
+                      placeholder="비밀번호 (8자 이상)"
+                      minLength={8}
                       value={signUpForm.password}
                       onChange={e => setSignUpForm({ ...signUpForm, password: e.target.value })}
                       style={{
