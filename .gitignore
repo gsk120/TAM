@@ -25,3 +25,8 @@ dist-ssr
 .env
 *백업*.json
 *backup*.json
+*migration*.json
+
+# Local financial databases and journals must never be committed.
+finance.db
+finance.db-*
