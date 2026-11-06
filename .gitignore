@@ -33,3 +33,4 @@ finance.db-*
 
 # Local requirements may contain private household details.
 /PRD.md
+/asset_plan.md
